@@ -259,8 +259,8 @@ python -m bill_extractor.evaluate --backend anthropic --data data/synthetic
 ```
 
 An oracle backend that returns ground truth scores 100% on fields and flags every
-faulty bill (covered by tests). The next real-model run should use faulty bills too,
-so the reported catch rate is the model's, not the oracle's.
+faulty bill (covered by tests). The real-model run below shows the catch rate is
+the model's, not the oracle's: Haiku flagged every faulty bill too.
 
 ### Degraded-photo curve: accuracy against photo damage
 
@@ -335,6 +335,36 @@ and 1,824 fields. No planted faults — these are the model's own misreads.
   not an arbitrary misread.
 - Latency per bill: 2.6 s median, 7.0 s p95. About 4,400 input and 380 output
   tokens per bill.
+
+### Planted-error bills: real run on Haiku
+
+Haiku 5.5, run on 17 October 2026: 24 bills × 3 formats (PDF, scan, photo), so
+72 documents and 1,368 fields. 12 bills carry a planted fault (36 documents),
+12 are clean.
+
+| Input | Documents | Field accuracy | All fields correct |
+|---|---|---|---|
+| Digital PDF | 24 | 99.8% | 95.8% |
+| 150 dpi scan | 24 | 100.0% | 100.0% |
+| Phone-style photo | 24 | 98.9% | 79.2% |
+
+- Overall: 99.6% field accuracy, 91.7% of documents with every field correct.
+  0 wrong, 6 missed, 0 invented values. The 6 missed are `period_days` and
+  `reading_type` (3 each) — fields no check fails on when they are left blank.
+- **Planted faults: checks flagged 36 of 36 faulty documents (100.0%),
+  expected check failed on 100.0%.** Every fault type 6/6: `wrong_total`,
+  `bad_mpan`, `swapped_readings`, `wrong_consumption`, `wrong_period_days`,
+  `missing_unit_rates`. The oracle's 100% was not a harness artefact — Haiku
+  reads the faulty bills faithfully and the checks catch all of them.
+- Review flag on the model's own errors: caught 0 of 5 clean documents with an
+  error (0.0%), false alarms 0.0%. Those 5 are the missed `period_days` /
+  `reading_type` above: a blank day count falls back to the counted date span,
+  so no check fails. This is the known coverage gap — checks catch
+  inconsistencies, not blank fields — and it is why the planted-fault run is
+  the meaningful review-flag measure, not the model-error rate.
+- Latency per bill: 3.4 s median, 4.6 s p95. About 4,600 input and 620 output
+  tokens per bill. Cost for the whole run: ~$0.06 on Haiku (vs ~$1.11 on
+  Sonnet at the same token counts).
 
 ## Tests
 
