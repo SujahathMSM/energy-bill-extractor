@@ -140,6 +140,66 @@ model returns the fields from your file.
 The response is trimmed here. Errors use standard codes: 413 (file too large), 415 (not a PDF
 or image), 422 (the model's answer never matched the schema) and 502 (provider error).
 
+## Switching savings
+
+`POST /v1/savings` compares an extracted bill with a target tariff on the same
+annual usage and estimates what switching would save. This is the onboarding
+pitch: read the old bill, then show the customer what they would pay elsewhere.
+
+```bash
+curl -X POST http://localhost:8000/v1/savings -H "Content-Type: application/json" -d '{
+  "extraction": {
+    "supplier_name": "Fernwick Energy", "currency": "GBP",
+    "billing_period_start": "2026-08-14", "billing_period_end": "2026-09-12",
+    "consumption_kwh": 287,
+    "unit_rates": [{"label": "Standard", "rate": 24.86, "rate_unit": "p/kWh", "kwh": 287}],
+    "standing_charge": 51.42, "standing_charge_unit": "p/day"
+  },
+  "target": {
+    "name": "Fuse Standard", "currency": "GBP",
+    "unit_rates": [{"rate": 20.0, "rate_unit": "p/kWh"}],
+    "standing_charge": 40.0, "standing_charge_unit": "p/day"
+  }
+}'
+```
+
+```json
+{
+  "currency": "GBP",
+  "annual_kwh": 3492.0,
+  "current": {"energy": 868.11, "standing": 187.68, "total": 1055.79},
+  "target": {"energy": 698.40, "standing": 146.00, "total": 844.40},
+  "target_name": "Fuse Standard",
+  "saving_annual": 211.39,
+  "saving_monthly": 17.62,
+  "saving_pct": 20.0,
+  "bands": [
+    {"label": "Standard", "annual_kwh": 3492.0, "current_cost": 868.11, "target_cost": 698.40}
+  ],
+  "warnings": [],
+  "assumptions": [
+    "Costs exclude tax/VAT; both tariffs are treated the same.",
+    "Annual use is daily average x 365 and ignores seasons.",
+    "Target is a single rate applied to all usage."
+  ]
+}
+```
+
+Rules, all in plain code (`bill_extractor/savings.py`):
+
+- **Annual use** is the bill's daily average x 365, the same estimate the
+  extraction reports. Economy 7 usage is split across Day/Night by the bands'
+  shares of the bill's kWh.
+- **Target** is one unlabelled rate applied to all usage, or one rate per band
+  matched by label. A labelled single rate matches only that band.
+- **Costs exclude tax/VAT**, so both tariffs are compared on the same basis.
+- **No invented current cost.** A bill with no unit rates printed cannot be
+  priced, so the endpoint returns 422 instead of guessing — the Oklahoma
+  sample bill is such a case. Currency mismatch and a target band with no
+  matching rate are also 422.
+- If the extraction was flagged for review, the result carries a warning that
+  the saving is only as good as the extraction.
+
 ## Evaluation
 
 `bill_extractor.synth` generates labelled UK bills in three layouts, each rendered as a digital
@@ -222,12 +282,14 @@ layouts, and worse photos.
 
 ## Tests
 
-`make test` runs 127 tests without network access or API keys. They cover:
+`make test` runs 139 tests without network access or API keys. They cover:
 
 - Preprocessing.
 - Every check, including that the generator's ground truth passes all of them.
 - Planted-error bills: each fault fails only its expected check, and an oracle backend
   flags every faulty bill while scoring 100% on fields.
+- Switching savings: mock-bill arithmetic, Economy 7 band split and label matching,
+  currency mismatch, unpriceable bills, and the `/v1/savings` endpoint.
 - The retry loop.
 - The evaluation harness: a backend that returns the ground truth must score 100%.
 - The exact request bodies sent to Claude and to OpenAI-compatible servers, and each fallback
@@ -245,6 +307,7 @@ bill_extractor/
   prompts.py        system prompt and instructions
   schema.py         Pydantic models (also the JSON schema sent to the model)
   validation.py     unit normalisation, derived figures, plausibility checks
+  savings.py        switching-savings estimate: current vs target tariff
   backends/         anthropic, openai-compatible (OpenAI, Ollama, vLLM), mock
   synth.py          synthetic bill generator
   scoring.py        field-level scoring and summary metrics
@@ -262,9 +325,10 @@ tests/
   not yet supported.
 - The annual-use estimate is average daily use x 365, so it is skewed by the season the bill
   covers.
-- Possible next steps: source locations for each field so a reviewer can jump to it, a
-  cost and latency comparison across models, and turning reviewed corrections into new
-  evaluation cases.
+- Savings is API-only so far; the demo page does not yet show it.
+- Possible next steps: demo-page savings UI, source locations for each field so a
+  reviewer can jump to it, a cost and latency comparison across models, and turning
+  reviewed corrections into new evaluation cases.
 
 ## License
 

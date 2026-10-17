@@ -15,6 +15,7 @@ from .backends import BackendError, build_backend
 from .config import get_settings
 from .extractor import BillExtractor, ExtractionError
 from .preprocess import UnsupportedFileError
+from .savings import SavingsEstimate, SavingsRequest, estimate_savings
 from .schema import ExtractionResult
 
 log = logging.getLogger("bill_extractor")
@@ -129,6 +130,31 @@ async def extract_bill(
         )
     )
     return result
+
+
+@app.post(
+    "/v1/savings",
+    response_model=SavingsEstimate,
+    responses={
+        422: {"description": "Saving cannot be estimated from this bill/target pair"},
+    },
+)
+async def savings(request_body: SavingsRequest) -> SavingsEstimate:
+    """Compare an extracted bill with a target tariff and estimate the annual saving.
+
+    Takes the extraction (and optionally its derived figures) from
+    POST /v1/bills/extract plus a target tariff. Costs exclude tax; see
+    bill_extractor.savings for the assumptions.
+    """
+    try:
+        return estimate_savings(
+            request_body.extraction,
+            request_body.target,
+            derived=request_body.derived,
+            needs_review=request_body.needs_review,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/", include_in_schema=False)
