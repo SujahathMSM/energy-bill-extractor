@@ -1,0 +1,33 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Only used when BILLX_BACKEND=ollama and the ollama service below is running.
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+    restart: unless-stopped
+
+  # Local model server. Start with: docker compose --profile local up
+  # then pull a vision model:    docker compose exec ollama ollama pull qwen2.5vl:3b
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    # GPU: uncomment on a host with the NVIDIA Container Toolkit installed.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  ollama:
