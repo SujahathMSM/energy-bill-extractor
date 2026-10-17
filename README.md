@@ -308,6 +308,34 @@ catch rate per fault type, and the oracle test proves it flags every faulty bill
 extraction is faithful. The next step is a harder set: real bills used with consent, more
 layouts, and worse photos.
 
+### Degraded-photo curve: real run
+
+Same model, run on 17 October 2026: 24 bills × 4 photo levels, so 96 documents
+and 1,824 fields. No planted faults — these are the model's own misreads.
+
+| Photo level | Documents | Field accuracy | All fields correct |
+|---|---|---|---|
+| Clean | 24 | 99.8% | 95.8% |
+| Mild | 24 | 99.6% | 91.7% |
+| Moderate | 24 | 99.6% | 91.7% |
+| Severe | 24 | 91.0% | 33.3% |
+
+- Overall: 97.5% field accuracy, 78.1% of documents with every field correct.
+  37 wrong, 9 missed, 0 invented values.
+- The curve is flat until severe, then falls off a cliff: two in three severe
+  photos have at least one wrong or missed field.
+- Weakest fields overall: MPAN 86.5%, meter serial 88.5%, supplier name 95.8%.
+  Long digit strings are what blur and glare break first. Everything money-shaped
+  stayed at 98–100%.
+- Review flag on the model's own errors: caught 14 of 21 documents with an
+  error (66.7%), false alarms 0.0%. The 7 that slipped through are misreads no
+  check covers — a wrong supplier name or meter serial still adds up, and a
+  misread MPAN can still pass its check digit. That is the gap the planted-fault
+  run measures separately: there the checks must catch a known inconsistency,
+  not an arbitrary misread.
+- Latency per bill: 2.6 s median, 7.0 s p95. About 4,400 input and 380 output
+  tokens per bill.
+
 ## Tests
 
 `make test` runs 146 tests without network access or API keys. They cover:
