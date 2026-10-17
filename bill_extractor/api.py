@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .backends import BackendError, build_backend
@@ -58,14 +59,19 @@ app = FastAPI(
 )
 
 
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
 @app.get("/health")
 async def health(request: Request) -> dict:
     extractor: BillExtractor = request.app.state.extractor
+    settings = request.app.state.settings
     return {
         "status": "ok",
         "version": __version__,
         "backend": extractor.backend.name,
         "model": extractor.backend.model,
+        "limits": {"max_upload_mb": settings.max_upload_mb, "max_pages": settings.max_pages},
     }
 
 

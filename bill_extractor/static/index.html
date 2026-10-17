@@ -3,122 +3,816 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bill Extractor</title>
+<title>Energy Bill Extractor</title>
+<meta name="description" content="Read an electricity bill with a vision model, then check every number with plain code.">
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #f6f7f9; --panel: #ffffff; --ink: #1f2328; --muted: #59636e; --line: #d8dee4;
-    --accent: #0f766e; --pass: #1a7f37; --pass-bg: #dafbe1; --fail: #b42318; --fail-bg: #ffebe9;
-    --skip: #6e7781; --skip-bg: #eef1f4;
+    --canvas: #f8f9fa;
+    --card: #ffffff;
+    --well: #f1f5f9;
+    --ink: #0f172a;
+    --ink-2: #334155;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --line-strong: #cbd5e1;
+    --accent: #059669;
+    --accent-hover: #047857;
+    --accent-bright: #10b981;
+    --pass-bg: #ecfdf5; --pass-line: #a7f3d0; --pass-ink: #065f46;
+    --warn-bg: #fffbeb; --warn-line: #fde68a; --warn-ink: #92400e;
+    --err-bg: #fef2f2; --err-line: #fecaca; --err-ink: #991b1b;
+    --skip-bg: #f1f5f9; --skip-line: #e2e8f0; --skip-ink: #475569;
+    --shadow-1: 0 1px 3px rgba(15, 23, 42, .04), 0 4px 8px -2px rgba(15, 23, 42, .02);
+    --shadow-2: 0 4px 12px -2px rgba(15, 23, 42, .06), 0 2px 4px -1px rgba(15, 23, 42, .03);
+    --inset: inset 0 1px 2px rgba(15, 23, 42, .04);
+    --r-card: 16px;
+    --r: 8px;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0d1117; --panel: #161b22; --ink: #e6edf3; --muted: #9198a1; --line: #30363d;
-      --accent: #2dd4bf; --pass: #3fb950; --pass-bg: #12261e; --fail: #ff7b72; --fail-bg: #2d1416;
-      --skip: #9198a1; --skip-bg: #21262d;
-    }
-  }
+
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  .drop { border: 1.5px dashed var(--line); border-radius: 12px; background: var(--panel);
-          padding: 28px; text-align: center; cursor: pointer; transition: border-color .15s; }
-  .drop.over, .drop:hover { border-color: var(--accent); }
-  .drop input { display: none; }
-  .status { margin: 16px 0; color: var(--muted); min-height: 1.5em; }
-  .banner { border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; font-weight: 600; }
-  .banner.ok { background: var(--pass-bg); color: var(--pass); }
-  .banner.review { background: var(--fail-bg); color: var(--fail); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
-  .card .k { font-size: 12px; color: var(--muted); }
-  .card .v { font-size: 16px; font-weight: 600; word-break: break-word; }
-  h2 { font-size: 15px; margin: 24px 0 8px; }
-  .checks { list-style: none; padding: 0; margin: 0; }
-  .checks li { display: flex; gap: 10px; align-items: baseline; padding: 8px 0;
-               border-bottom: 1px solid var(--line); }
-  .pill { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 1px 8px; flex: none; }
-  .pill.pass { background: var(--pass-bg); color: var(--pass); }
-  .pill.fail { background: var(--fail-bg); color: var(--fail); }
-  .pill.skipped { background: var(--skip-bg); color: var(--skip); }
-  .checks .name { font-weight: 600; flex: none; }
-  .checks .detail { color: var(--muted); }
-  details { margin-top: 20px; }
-  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-        padding: 12px; overflow-x: auto; font-size: 12.5px; }
-  .meta { color: var(--muted); font-size: 13px; margin-top: 12px; }
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--canvas); color: var(--ink);
+    font: 400 14px/20px var(--sans); -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: 4px; }
+  [hidden] { display: none !important; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 32px; }
+
+  /* Header */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(255, 255, 255, .9); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar-in { height: 64px; display: flex; align-items: center; gap: 32px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 600; font-size: 15px; letter-spacing: -.01em; }
+  .brand img { display: block; }
+  .nav { display: flex; gap: 24px; }
+  .nav a { text-decoration: none; color: var(--muted); }
+  .nav a:hover { color: var(--ink); }
+  .top-actions { margin-left: auto; display: flex; gap: 8px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    height: 36px; padding: 0 14px; border-radius: var(--r); border: 1px solid transparent;
+    font: 500 14px/1 var(--sans); text-decoration: none; cursor: pointer; white-space: nowrap;
+    transition: background-color .15s, border-color .15s, transform .1s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { background: var(--line-strong); cursor: not-allowed; }
+  .btn-secondary { background: var(--card); color: var(--ink); border-color: var(--line); }
+  .btn-secondary:hover { background: var(--canvas); border-color: var(--line-strong); }
+  .btn-ghost { background: transparent; color: var(--muted); height: 28px; padding: 0 8px; }
+  .btn-ghost:hover { color: var(--ink); background: var(--well); }
+  .btn-block { width: 100%; height: 44px; font-weight: 600; }
+  .btn svg { flex: none; }
+  kbd {
+    font: 500 11px/1 var(--mono); padding: 3px 6px; border-radius: 4px;
+    background: rgba(255, 255, 255, .16); border: 1px solid rgba(255, 255, 255, .28);
+  }
+  .btn-primary:disabled kbd { opacity: .6; }
+
+  /* Hero */
+  .hero { padding: 48px 0 24px; }
+  h1 { font-size: 36px; line-height: 44px; font-weight: 600; letter-spacing: -.025em; margin: 0; max-width: 18em; }
+  .lede { font-size: 16px; line-height: 24px; color: var(--muted); margin: 12px 0 0; max-width: 40em; }
+
+  /* Workspace */
+  .workspace { display: grid; grid-template-columns: 5fr 7fr; gap: 24px; align-items: start; margin-top: 32px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow-1); }
+  .input-panel { padding: 24px; display: grid; gap: 20px; }
+  .label {
+    font: 600 11px/14px var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+  }
+  .group { display: grid; gap: 8px; }
+
+  .drop {
+    display: grid; justify-items: center; gap: 6px; text-align: center; cursor: pointer;
+    padding: 28px 16px; border: 1.5px dashed var(--line-strong); border-radius: 12px;
+    background: var(--canvas); transition: border-color .15s, background-color .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--pass-bg); }
+  .drop-icon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--card); border: 1px solid var(--line); color: var(--accent); margin-bottom: 4px; }
+  .drop strong { font-weight: 600; font-size: 15px; }
+  .drop .hint { color: var(--muted); font-size: 12px; line-height: 16px; }
+
+  .preview { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .preview-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--line); }
+  .preview-name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .preview-size { font-size: 11px; color: var(--muted); flex: none; }
+  .preview-head .btn-ghost { margin-left: auto; }
+  .preview-body { background: var(--well); box-shadow: var(--inset); height: 300px; display: grid; place-items: center; }
+  .preview-body img { max-width: 100%; max-height: 300px; display: block; }
+  .preview-body object { width: 100%; height: 300px; border: 0; }
+
+  .samples { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .sample {
+    text-align: left; padding: 10px; border-radius: var(--r); cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); font: inherit; color: inherit;
+    display: grid; gap: 2px; transition: border-color .15s, box-shadow .15s;
+  }
+  .sample:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); }
+  .sample[aria-pressed="true"] { border-color: var(--accent); background: var(--pass-bg); }
+  .sample-kind { font-size: 11px; font-weight: 600; color: var(--accent); }
+  .sample-name { font-weight: 500; font-size: 13px; }
+  .sample-note { font-size: 11px; color: var(--muted); }
+  .sample:disabled { opacity: .55; cursor: wait; }
+
+  .engine { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: var(--r); background: var(--well); border: 1px solid var(--line); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); margin-top: 6px; flex: none; }
+  .dot.ok { background: var(--accent-bright); }
+  .dot.bad { background: #dc2626; }
+  .engine-model { font-size: 13px; font-weight: 500; }
+  .engine-note { font-size: 12px; color: var(--muted); line-height: 16px; margin-top: 2px; }
+  .privacy { display: flex; gap: 8px; color: var(--muted); font-size: 12px; line-height: 16px; }
+  .privacy svg { flex: none; color: var(--accent); margin-top: 1px; }
+
+  /* Result panel */
+  .result-panel { overflow: hidden; min-height: 640px; display: flex; flex-direction: column; }
+  .result-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 12px 24px; border-bottom: 1px solid var(--line); background: #fbfcfd; }
+  .result-title { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .tabs { display: flex; gap: 2px; padding: 2px; border-radius: var(--r); background: var(--well); border: 1px solid var(--line); }
+  .tabs button { font: 500 12px/1 var(--sans); padding: 7px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(15, 23, 42, .06); }
+  .result-body { padding: 24px; display: grid; gap: 16px; align-content: start; flex: 1; }
+  .result-body[hidden] { display: none; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px;
+    border-radius: 999px; border: 1px solid; font: 500 12px/1 var(--sans); white-space: nowrap;
+  }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge-pass { background: var(--pass-bg); border-color: var(--pass-line); color: var(--pass-ink); }
+  .badge-pass::before { background: var(--accent-bright); }
+  .badge-warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
+  .badge-err { background: var(--err-bg); border-color: var(--err-line); color: var(--err-ink); }
+  .badge-idle { background: var(--skip-bg); border-color: var(--skip-line); color: var(--skip-ink); }
+  .badge-busy { background: var(--card); border-color: var(--line); color: var(--ink-2); }
+  .badge-busy::before { background: var(--accent-bright); animation: blink 1s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  .note { margin: 0; color: var(--muted); }
+  .note .timer { color: var(--ink); }
+
+  .cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .cell { padding: 12px; border-radius: var(--r); border: 1px solid var(--line); background: #fbfcfd; min-width: 0; }
+  .cell .value { margin-top: 6px; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+  .cell .value.mono { font-size: 13px; }
+  .cell .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .block { border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; }
+  .block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .block-head .count { font-size: 12px; color: var(--muted); }
+
+  .mpan { display: inline-grid; grid-auto-flow: column; width: max-content; max-width: 100%; border: 1px solid var(--line); border-radius: var(--r); background: var(--canvas); box-shadow: var(--inset); overflow: hidden; }
+  .mpan span { padding: 10px 14px; font: 500 16px/24px var(--mono); letter-spacing: .02em; border-right: 1px solid var(--line); min-width: 52px; text-align: center; }
+  .mpan span:last-child { border-right: 0; }
+  .mpan.raw span { min-width: 0; }
+
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0; }
+  .facts div { min-width: 0; }
+  .facts dt { font-size: 12px; color: var(--muted); }
+  .facts dd { margin: 2px 0 0; font-weight: 500; overflow-wrap: anywhere; }
+  .facts dd .sub { display: block; font: 400 12px/16px var(--sans); color: var(--muted); letter-spacing: 0; }
+
+  .ledger { width: 100%; border-collapse: collapse; }
+  .ledger td { padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+  .ledger td:nth-child(2) { color: var(--muted); padding-left: 12px; }
+  .ledger td:last-child { text-align: right; padding-left: 12px; white-space: nowrap; }
+  .ledger tr.computed td { color: var(--muted); }
+  .ledger tr.total td { border-bottom: 0; padding-top: 12px; font-weight: 600; font-size: 15px; }
+  .ledger tr.total td:last-child { color: var(--accent-hover); font-size: 16px; }
+  .ledger .mono { font-size: 13px; }
+
+  .callout { display: flex; gap: 12px; padding: 14px 16px; border-radius: 12px; border: 1px solid; }
+  .callout svg { flex: none; margin-top: 1px; }
+  .callout h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .callout p, .callout ul { margin: 4px 0 0; font-size: 13px; }
+  .callout ul { padding-left: 18px; }
+  .callout-warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
+  .callout-err { background: var(--err-bg); border-color: var(--err-line); color: var(--err-ink); }
+
+  .checks { list-style: none; margin: 0; padding: 0; }
+  .checks li { display: grid; grid-template-columns: 84px minmax(0, 220px) 1fr; gap: 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
+  .checks li:first-child { border-top: 0; padding-top: 0; }
+  .checks .what { font-weight: 500; }
+  .checks .why { color: var(--muted); font-size: 13px; }
+  .pill { justify-self: start; font: 500 11px/1 var(--sans); padding: 4px 8px; border-radius: 999px; border: 1px solid; }
+  .pill-pass { background: var(--pass-bg); border-color: var(--pass-line); color: var(--pass-ink); }
+  .pill-fail { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
+  .pill-skipped { background: var(--skip-bg); border-color: var(--skip-line); color: var(--skip-ink); }
+
+  .run { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; font-size: 12px; color: var(--muted); }
+  .run div { display: flex; gap: 6px; }
+  .run dd { margin: 0; color: var(--ink-2); }
+
+  .ph { display: inline-block; max-width: 100%; height: 12px; border-radius: 4px; background: var(--line); vertical-align: middle; }
+  .is-loading .ph { background: linear-gradient(90deg, var(--line) 0%, #eef2f6 50%, var(--line) 100%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .is-loading .ph, .badge-busy::before { animation: none; } }
+  .reveal { animation: reveal .25s ease-out; }
+  @keyframes reveal { from { opacity: 0; transform: translateY(4px); } }
+  @media (prefers-reduced-motion: reduce) { .reveal { animation: none; } }
+
+  .json-view { padding: 0; display: flex; flex-direction: column; gap: 0; }
+  .json-tools { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .json-view pre { margin: 0; padding: 16px 24px; background: var(--well); box-shadow: var(--inset); font: 400 12px/18px var(--mono); color: var(--ink-2); overflow: auto; max-height: 720px; flex: 1; }
+
+  /* Sections */
+  section.band { padding: 72px 0 0; }
+  h2 { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -.02em; margin: 0; }
+  .section-lede { color: var(--muted); font-size: 15px; line-height: 22px; margin: 8px 0 0; max-width: 46em; }
+
+  .steps { list-style: none; margin: 28px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--card); box-shadow: var(--shadow-1); overflow: hidden; }
+  .steps li { padding: 20px; border-left: 1px solid var(--line); display: grid; gap: 8px; align-content: start; }
+  .steps li:first-child { border-left: 0; }
+  .step-n { width: 28px; height: 28px; border-radius: var(--r); display: grid; place-items: center; background: var(--pass-bg); color: var(--pass-ink); font: 600 13px/1 var(--mono); border: 1px solid var(--pass-line); }
+  .steps h3 { margin: 4px 0 0; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -.01em; }
+  .steps p { margin: 0; color: var(--ink-2); }
+  .steps .tech { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  .stats { margin: 28px 0 0; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--card); box-shadow: var(--shadow-1); overflow: hidden; }
+  .stats div { padding: 18px 20px; border-left: 1px solid var(--line); }
+  .stats div:first-child { border-left: 0; }
+  .stats dt { font-size: 12px; color: var(--muted); }
+  .stats dd { margin: 6px 0 0; font: 500 22px/28px var(--mono); letter-spacing: -.02em; }
+  .stats dd small { display: block; font: 400 12px/16px var(--sans); color: var(--muted); letter-spacing: 0; margin-top: 2px; }
+
+  .table-wrap { margin-top: 16px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--card); box-shadow: var(--shadow-1); overflow-x: auto; }
+  table.data { width: 100%; border-collapse: collapse; min-width: 560px; }
+  table.data th { text-align: left; padding: 12px 20px; background: #fbfcfd; border-bottom: 1px solid var(--line); }
+  table.data td { padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  table.data tr:last-child td { border-bottom: 0; }
+  table.data td.num, table.data th.num { text-align: right; }
+  .fine { margin: 16px 0 0; color: var(--muted); max-width: 52em; }
+
+  footer { margin-top: 96px; border-top: 1px solid var(--line); background: var(--card); }
+  .foot { display: flex; align-items: center; gap: 24px; padding: 28px 32px; flex-wrap: wrap; }
+  .foot .brand { font-size: 14px; }
+  .foot p { margin: 0; color: var(--muted); font-size: 12px; }
+  .foot nav { margin-left: auto; display: flex; gap: 20px; font-size: 13px; }
+  .foot nav a { text-decoration: none; color: var(--muted); }
+  .foot nav a:hover { color: var(--ink); }
+
+  @media (max-width: 1023px) {
+    .workspace { grid-template-columns: 1fr; }
+    .result-panel { min-height: 0; }
+    .steps, .stats { grid-template-columns: repeat(2, 1fr); }
+    .steps li:nth-child(3), .stats div:nth-child(3) { border-left: 0; }
+    .steps li:nth-child(n+3), .stats div:nth-child(n+3) { border-top: 1px solid var(--line); }
+  }
+  @media (max-width: 767px) {
+    .wrap { padding: 0 16px; }
+    .nav { display: none; }
+    .top-actions .btn-secondary { display: none; }
+    .hero { padding-top: 28px; }
+    h1 { font-size: 28px; line-height: 36px; letter-spacing: -.02em; }
+    .input-panel, .result-body { padding: 16px; }
+    .result-head { padding: 10px 12px 10px 16px; }
+    .cells, .facts { grid-template-columns: 1fr 1fr; }
+    .samples { grid-template-columns: 1fr; }
+    .checks li { grid-template-columns: 76px 1fr; row-gap: 2px; }
+    .cells .cell:last-child { grid-column: 1 / -1; }
+    .ledger tr { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; border-bottom: 1px solid var(--line); padding: 8px 0; }
+    .ledger tr.total { border-bottom: 0; padding-top: 12px; }
+    .ledger td, .ledger tr.total td { border: 0; padding: 0; }
+    .ledger td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; padding: 2px 0 0; font-size: 12px; }
+    .ledger td:nth-child(2):empty { display: none; }
+    .checks .why { grid-column: 2; }
+    .steps, .stats { grid-template-columns: 1fr; }
+    .steps li, .stats div { border-left: 0; border-top: 1px solid var(--line); }
+    .steps li:first-child, .stats div:first-child { border-top: 0; }
+    .foot { padding: 24px 16px; }
+    .foot nav { margin-left: 0; }
+  }
 </style>
 </head>
 <body>
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <a class="brand" href="/">
+      <img src="/static/logo.svg" width="28" height="28" alt="">
+      <span>Energy Bill Extractor</span>
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#try">Try it</a>
+      <a href="#how">How it works</a>
+      <a href="#results">Results</a>
+    </nav>
+    <div class="top-actions">
+      <a class="btn btn-secondary" href="https://github.com/SujahathMSM/energy-bill-extractor" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Source code
+      </a>
+      <a class="btn btn-primary" href="/docs">API docs</a>
+    </div>
+  </div>
+</header>
+
 <main>
-  <h1>Electricity bill extractor</h1>
-  <p class="sub">Drop a bill (PDF or photo). A vision model reads it; code checks the numbers add up.</p>
+  <section class="wrap hero" id="try">
+    <h1>Turn an electricity bill into checked, structured data</h1>
+    <p class="lede">A vision model reads the bill exactly as printed. Plain code converts the units, reconciles the charges and flags anything a person should check before the data is used.</p>
 
-  <label class="drop" id="drop">
-    <input type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/webp">
-    <strong>Choose a bill</strong> or drop it here
-  </label>
-  <div class="status" id="status"></div>
-  <section id="result" hidden></section>
+    <div class="workspace">
+      <!-- Input -->
+      <div class="panel input-panel">
+        <div class="group">
+          <span class="label" id="bill-label">Bill</span>
+          <label class="drop" id="drop" for="file">
+            <span class="drop-icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+            </span>
+            <strong>Drop a bill here, or choose a file</strong>
+            <span class="hint" id="limits">PDF, PNG, JPEG or WebP</span>
+          </label>
+          <input class="sr-only" type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/webp" aria-labelledby="bill-label">
+
+          <div class="preview" id="preview" hidden>
+            <div class="preview-head">
+              <span class="preview-name" id="preview-name"></span>
+              <span class="preview-size mono" id="preview-size"></span>
+              <button class="btn btn-ghost" type="button" id="clear">Remove</button>
+            </div>
+            <div class="preview-body" id="preview-body"></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <span class="label">Or try a sample bill</span>
+          <div class="samples">
+            <button class="sample" type="button" aria-pressed="false" data-src="/static/samples/bill_000.pdf" data-type="application/pdf">
+              <span class="sample-kind">Digital PDF</span>
+              <span class="sample-name">Brackenridge Power</span>
+              <span class="sample-note">Single rate, meter readings</span>
+            </button>
+            <button class="sample" type="button" aria-pressed="false" data-src="/static/samples/bill_001.png" data-type="image/png">
+              <span class="sample-kind">Scan</span>
+              <span class="sample-name">Halcyon Volt</span>
+              <span class="sample-note">Economy 7, day and night</span>
+            </button>
+            <button class="sample" type="button" aria-pressed="false" data-src="/static/samples/bill_002_photo.jpg" data-type="image/jpeg">
+              <span class="sample-kind">Phone photo</span>
+              <span class="sample-name">Brackenridge Power</span>
+              <span class="sample-note">Tilted, previous balance</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="engine">
+          <span class="dot" id="engine-dot" aria-hidden="true"></span>
+          <div>
+            <div class="engine-model mono" id="engine-model">Checking the server…</div>
+            <div class="engine-note" id="engine-note">The model is chosen on the server with BILLX_BACKEND.</div>
+          </div>
+        </div>
+
+        <p class="privacy">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          <span>Files are processed in memory and never stored. Logs record timings and check results, not what the bill says.</span>
+        </p>
+
+        <button class="btn btn-primary btn-block" type="button" id="extract" disabled>
+          <span>Extract fields</span><kbd id="shortcut">Ctrl Enter</kbd>
+        </button>
+      </div>
+
+      <!-- Result -->
+      <div class="panel result-panel">
+        <div class="result-head">
+          <div class="result-title">
+            <span>Result</span>
+            <span class="badge badge-idle" id="status" role="status" aria-live="polite">Waiting for a bill</span>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Result view">
+            <button role="tab" type="button" id="tab-fields" aria-selected="true" aria-controls="view-fields">Fields</button>
+            <button role="tab" type="button" id="tab-json" aria-selected="false" aria-controls="view-json">JSON</button>
+          </div>
+        </div>
+        <div class="result-body" id="view-fields" role="tabpanel" aria-labelledby="tab-fields"></div>
+        <div class="result-body json-view" id="view-json" role="tabpanel" aria-labelledby="tab-json" hidden>
+          <div class="json-tools">
+            <span>The exact response from POST /v1/bills/extract</span>
+            <button class="btn btn-secondary" type="button" id="copy" style="height:28px;font-size:12px">Copy</button>
+          </div>
+          <pre id="json-out">No result yet. Extract a bill to see the response.</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap band" id="how">
+    <h2>How it works</h2>
+    <p class="section-lede">The model only reads. Everything that can be calculated is calculated in code, so a misread digit shows up as a sum that doesn't add up.</p>
+    <ol class="steps">
+      <li>
+        <span class="step-n">1</span>
+        <h3>Prepare the file</h3>
+        <p>PDF pages are rendered to images. Photos are turned upright using their EXIF data and resized.</p>
+        <span class="tech">pypdfium2, Pillow</span>
+      </li>
+      <li>
+        <span class="step-n">2</span>
+        <h3>Read the bill</h3>
+        <p>A vision model copies each field exactly as printed, in its original units. Anything not on the bill is left empty.</p>
+        <span class="tech">Claude, OpenAI-compatible models or Ollama</span>
+      </li>
+      <li>
+        <span class="step-n">3</span>
+        <h3>Validate the reply</h3>
+        <p>The reply is checked against a schema. If it doesn't fit, the errors go back to the model for one more attempt.</p>
+        <span class="tech">Pydantic</span>
+      </li>
+      <li>
+        <span class="step-n">4</span>
+        <h3>Check the numbers</h3>
+        <p>Code converts pence to pounds, reconciles rates, readings and totals, and tests the MPAN check digit. Any failure marks the bill for review.</p>
+        <span class="tech">Plain Python, no model</span>
+      </li>
+    </ol>
+  </section>
+
+  <section class="wrap band" id="results">
+    <h2>Results on synthetic bills</h2>
+    <p class="section-lede">claude-sonnet-5-5, 17 October 2026. Ten fictional bills, each tested as a digital PDF, a 150 dpi scan and a tilted, unevenly lit phone photo.</p>
+    <dl class="stats">
+      <div><dt>Field accuracy</dt><dd>100%<small>510 of 510 fields</small></dd></div>
+      <div><dt>Bills with every field right</dt><dd>30 of 30<small>across all three formats</small></dd></div>
+      <div><dt>Time per bill</dt><dd>2.5 s<small>median; 3.2 s at p95</small></dd></div>
+      <div><dt>Tokens per bill</dt><dd>4.2k<small>in, plus about 270 out</small></dd></div>
+    </dl>
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th class="label">Format</th>
+            <th class="label num">Bills</th>
+            <th class="label num">Field accuracy</th>
+            <th class="label num">Every field right</th>
+            <th class="label num">Median time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Digital PDF</td><td class="num mono">10</td><td class="num mono">100%</td><td class="num mono">10 of 10</td><td class="num mono">2.6 s</td></tr>
+          <tr><td>Scan, 150 dpi</td><td class="num mono">10</td><td class="num mono">100%</td><td class="num mono">10 of 10</td><td class="num mono">2.6 s</td></tr>
+          <tr><td>Phone photo</td><td class="num mono">10</td><td class="num mono">100%</td><td class="num mono">10 of 10</td><td class="num mono">2.4 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="fine">These bills are clean and consistently laid out, so a perfect score shows the pipeline works end to end, not that real bills will score perfectly. Because nothing was wrong, this run couldn't test how often the review flag catches real mistakes. Unit tests cover that by planting known errors, such as pence read as pounds or a misread MPAN digit.</p>
+  </section>
 </main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="/">
+      <img src="/static/logo.svg" width="24" height="24" alt="">
+      <span>Energy Bill Extractor</span>
+    </a>
+    <p>Sample bills are synthetic, from fictional suppliers.</p>
+    <nav aria-label="Footer">
+      <a href="/docs">API docs</a>
+      <a href="https://github.com/SujahathMSM/energy-bill-extractor" rel="noopener">Source code</a>
+      <a href="https://github.com/SujahathMSM/energy-bill-extractor/blob/main/LICENSE" rel="noopener">MIT licence</a>
+    </nav>
+  </div>
+</footer>
+
 <script>
-const $ = (id) => document.getElementById(id);
-const drop = $("drop"), input = $("file"), statusEl = $("status"), resultEl = $("result");
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    file: $("file"), drop: $("drop"), preview: $("preview"), previewName: $("preview-name"),
+    previewSize: $("preview-size"), previewBody: $("preview-body"), clear: $("clear"),
+    extract: $("extract"), status: $("status"), fields: $("view-fields"), json: $("view-json"),
+    jsonOut: $("json-out"), tabFields: $("tab-fields"), tabJson: $("tab-json"), copy: $("copy"),
+    engineDot: $("engine-dot"), engineModel: $("engine-model"), engineNote: $("engine-note"),
+    limits: $("limits"), shortcut: $("shortcut"),
+  };
+  const samples = [...document.querySelectorAll(".sample")];
+  const state = { file: null, objectUrl: null, busy: false, maxBytes: 10 * 1024 * 1024, timer: null };
 
-const esc = (s) => String(s ?? "—").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const money = (v, cur) => v == null ? "—" : `${v.toFixed(2)} ${cur ?? ""}`.trim();
+  const CHECK_NAMES = {
+    onboarding_fields: "Fields needed for sign-up",
+    billing_period: "Billing period",
+    units_understood: "Rate units",
+    currency_consistent: "Currency",
+    rates_plausible: "Unit rates in a normal range",
+    readings_match_consumption: "Meter readings match usage",
+    bands_match_consumption: "Rate bands add up to usage",
+    cost_reconciles: "Charges add up to the subtotal",
+    total_reconciles: "Subtotal plus VAT equals the total",
+    meter_point_checksum: "MPAN check digit",
+  };
+  const SYMBOLS = { GBP: "£", EUR: "€", USD: "$" };
 
-["dragenter", "dragover"].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add("over"); }));
-["dragleave", "drop"].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.remove("over"); }));
-drop.addEventListener("drop", (ev) => ev.dataTransfer.files[0] && upload(ev.dataTransfer.files[0]));
-input.addEventListener("change", () => input.files[0] && upload(input.files[0]));
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+  const num = (v, dp) => isNum(v) ? v.toLocaleString("en-GB", dp === undefined ? { maximumFractionDigits: 3 } : { minimumFractionDigits: dp, maximumFractionDigits: dp }) : null;
+  const money = (v, cur) => {
+    if (!isNum(v)) return null;
+    const sym = SYMBOLS[cur];
+    const n = num(Math.abs(v), 2);
+    return `${v < 0 ? "−" : ""}${sym ? sym + n : n + (cur ? " " + cur : "")}`;
+  };
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const date = (iso) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+    return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : (iso || null);
+  };
+  const bytes = (n) => n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+  const ph = (w) => `<span class="ph" style="width:${w}px"></span>`;
+  const val = (v, w = 90) => (v === null || v === undefined || v === "") ? ph(w) : esc(v);
+  const dash = (v) => (v === null || v === undefined || v === "") ? "—" : esc(v);
+  const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
-async function upload(file) {
-  resultEl.hidden = true;
-  statusEl.textContent = `Reading ${file.name}…`;
-  const body = new FormData();
-  body.append("file", file);
-  try {
-    const res = await fetch("/v1/bills/extract", { method: "POST", body });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || res.statusText);
-    statusEl.textContent = "";
-    render(data);
-  } catch (err) {
-    statusEl.textContent = `Could not read the bill: ${err.message}`;
+  // ---------- server status ----------
+  fetch("/health").then((r) => r.ok ? r.json() : Promise.reject(r.status)).then((h) => {
+    els.engineDot.className = "dot ok";
+    els.engineModel.textContent = h.model;
+    els.engineNote.textContent = h.backend === "mock"
+      ? "Mock backend: returns the same example bill for any file. Set BILLX_BACKEND to use a real model."
+      : `Backend: ${h.backend}. Chosen on the server with BILLX_BACKEND.`;
+    if (h.limits) {
+      state.maxBytes = h.limits.max_upload_mb * 1024 * 1024;
+      els.limits.textContent = `PDF, PNG, JPEG or WebP, up to ${h.limits.max_upload_mb} MB. PDFs: first ${h.limits.max_pages} pages are read.`;
+    }
+  }).catch(() => {
+    els.engineDot.className = "dot bad";
+    els.engineModel.textContent = "Server not reachable";
+    els.engineNote.textContent = "Start it with: python -m bill_extractor";
+  });
+  if (/Mac|iPhone|iPad/.test(navigator.platform)) els.shortcut.textContent = "⌘ Enter";
+
+  // ---------- file selection ----------
+  function setFile(file, fromSample) {
+    if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+    state.file = file; state.objectUrl = null;
+    if (!fromSample) samples.forEach((b) => b.setAttribute("aria-pressed", "false"));
+    if (!file) {
+      els.preview.hidden = true; els.drop.hidden = false; els.previewBody.innerHTML = "";
+      els.extract.disabled = true; return;
+    }
+    state.objectUrl = URL.createObjectURL(file);
+    els.previewName.textContent = file.name;
+    els.previewSize.textContent = bytes(file.size);
+    els.previewBody.innerHTML = file.type === "application/pdf"
+      ? `<object data="${state.objectUrl}#toolbar=0&navpanes=0" type="application/pdf"><span class="note">Preview not available. The file will still be read.</span></object>`
+      : `<img src="${state.objectUrl}" alt="Preview of ${esc(file.name)}">`;
+    els.preview.hidden = false; els.drop.hidden = true;
+    els.extract.disabled = state.busy;
   }
-}
 
-function render(r) {
-  const x = r.extraction, d = r.derived, cur = d.currency;
-  const rates = d.unit_rates.map((u) =>
-    `${esc(u.label || "Rate")}: ${u.per_kwh == null ? "?" : u.per_kwh.toFixed(4)} ${esc(cur)}/kWh`).join("<br>");
-  const cards = [
-    ["Supplier", esc(x.supplier_name)],
-    ["Tariff", esc(x.tariff_name)],
-    ["Supply number", esc(x.meter_point_id)],
-    ["Period", `${esc(x.billing_period_start)} → ${esc(x.billing_period_end)}${d.period_days ? ` (${d.period_days} days)` : ""}`],
-    ["Used", x.consumption_kwh == null ? "—" : `${x.consumption_kwh} kWh`],
-    ["Unit rates", rates || "—"],
-    ["Standing charge", d.standing_charge_per_day == null ? "—" : `${d.standing_charge_per_day.toFixed(4)} ${esc(cur)}/day`],
-    ["Total this period", money(x.total_amount, cur)],
-    ["Estimated annual use", d.estimated_annual_kwh == null ? "—" : `${d.estimated_annual_kwh} kWh`],
-  ];
-  const banner = r.needs_review
-    ? `<div class="banner review">Needs review: ${r.review_reasons.length} check(s) failed</div>`
-    : `<div class="banner ok">All checks passed</div>`;
-  resultEl.innerHTML = `
-    ${banner}
-    <div class="grid">${cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}</div>
-    <h2>Checks</h2>
-    <ul class="checks">${r.checks.map((c) =>
-      `<li><span class="pill ${c.status}">${c.status}</span><span class="name">${esc(c.name)}</span><span class="detail">${esc(c.detail)}</span></li>`).join("")}</ul>
-    <p class="meta">${esc(r.meta.backend)} · ${esc(r.meta.model)} · ${r.meta.latency_ms} ms · ${r.meta.attempts} attempt(s) · ${r.meta.pages_sent} page(s)</p>
-    <details><summary>Raw response</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details>`;
-  resultEl.hidden = false;
-}
+  function pick(file) {
+    if (!file) return;
+    if (!/^(application\/pdf|image\/(png|jpeg|webp))$/.test(file.type)) {
+      showError("This file type isn't supported. Choose a PDF, PNG, JPEG or WebP file.");
+      return;
+    }
+    if (file.size > state.maxBytes) {
+      showError(`This file is ${bytes(file.size)}. The limit is ${bytes(state.maxBytes)}.`);
+      return;
+    }
+    setFile(file, false);
+  }
+
+  els.file.addEventListener("change", () => { pick(els.file.files[0]); els.file.value = ""; });
+  els.clear.addEventListener("click", () => setFile(null));
+  ["dragenter", "dragover"].forEach((t) => els.drop.addEventListener(t, (e) => { e.preventDefault(); els.drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((t) => els.drop.addEventListener(t, (e) => { e.preventDefault(); els.drop.classList.remove("over"); }));
+  els.drop.addEventListener("drop", (e) => pick(e.dataTransfer.files[0]));
+
+  samples.forEach((btn) => btn.addEventListener("click", async () => {
+    if (state.busy) return;
+    samples.forEach((b) => { b.setAttribute("aria-pressed", String(b === btn)); b.disabled = true; });
+    try {
+      const res = await fetch(btn.dataset.src);
+      if (!res.ok) throw new Error(`Sample not found (${res.status}).`);
+      const blob = await res.blob();
+      const name = btn.dataset.src.split("/").pop();
+      setFile(new File([blob], name, { type: btn.dataset.type }), true);
+      await extract();
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      samples.forEach((b) => { b.disabled = false; });
+    }
+  }));
+
+  els.extract.addEventListener("click", () => extract());
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && state.file && !state.busy) { e.preventDefault(); extract(); }
+  });
+
+  // ---------- tabs ----------
+  function showTab(which) {
+    const json = which === "json";
+    els.tabFields.setAttribute("aria-selected", String(!json));
+    els.tabJson.setAttribute("aria-selected", String(json));
+    els.fields.hidden = json; els.json.hidden = !json;
+  }
+  els.tabFields.addEventListener("click", () => showTab("fields"));
+  els.tabJson.addEventListener("click", () => showTab("json"));
+  els.copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(els.jsonOut.textContent); els.copy.textContent = "Copied"; }
+    catch { els.copy.textContent = "Copy failed"; }
+    setTimeout(() => { els.copy.textContent = "Copy"; }, 1500);
+  });
+
+  // ---------- status ----------
+  function setStatus(kind, text) {
+    els.status.className = `badge badge-${kind}`;
+    els.status.textContent = text;
+  }
+
+  // ---------- extraction ----------
+  async function extract() {
+    if (!state.file || state.busy) return;
+    state.busy = true; els.extract.disabled = true;
+    setStatus("busy", "Reading the bill");
+    const started = performance.now();
+    render(null, "loading");
+    state.timer = setInterval(() => {
+      const t = document.getElementById("elapsed");
+      if (t) t.textContent = `${((performance.now() - started) / 1000).toFixed(1)} s`;
+    }, 100);
+    const body = new FormData();
+    body.append("file", state.file);
+    try {
+      const res = await fetch("/v1/bills/extract", { method: "POST", body });
+      let data = null;
+      try { data = await res.json(); } catch { /* non-JSON error page */ }
+      if (!res.ok) {
+        const detail = data && typeof data.detail === "string" ? data.detail : `The server returned ${res.status}.`;
+        const id = res.headers.get("x-request-id");
+        throw new Error(id ? `${detail} Request ID: ${id}.` : detail);
+      }
+      els.jsonOut.textContent = JSON.stringify(data, null, 2);
+      render(data, "done");
+      const failed = data.checks.filter((c) => c.status === "fail").length;
+      setStatus(data.needs_review ? "warn" : "pass", data.needs_review ? `Needs review: ${failed} check${failed === 1 ? "" : "s"} failed` : "All checks passed");
+    } catch (err) {
+      showError(err.message || "The request failed. Check that the server is running.");
+    } finally {
+      clearInterval(state.timer);
+      state.busy = false; els.extract.disabled = !state.file;
+    }
+  }
+
+  function showError(message) {
+    setStatus("err", "Failed");
+    els.fields.innerHTML = `
+      <div class="callout callout-err reveal">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><path d="M12 16.5v.5"/></svg>
+        <div><h3>The bill couldn't be read</h3><p>${esc(message)}</p></div>
+      </div>`;
+    showTab("fields");
+  }
+
+  // ---------- rendering ----------
+  function mpanCells(id) {
+    if (!id) return `<div class="mpan">${[0, 1, 2, 3].map(() => `<span>${ph(28)}</span>`).join("")}</div>`;
+    const digits = id.replace(/\D/g, "");
+    const core = digits.length === 21 ? digits.slice(-13) : digits;
+    if (core.length !== 13) return `<div class="mpan raw"><span>${esc(id)}</span></div>`;
+    return `<div class="mpan" aria-label="MPAN ${core}">${[core.slice(0, 2), core.slice(2, 6), core.slice(6, 10), core.slice(10)].map((g) => `<span>${g}</span>`).join("")}</div>`;
+  }
+
+  function checkBadge(check, labels) {
+    if (!check) return "";
+    const [cls, text] = check.status === "pass" ? ["badge-pass", labels[0]] : check.status === "fail" ? ["badge-warn", labels[1]] : ["badge-idle", labels[2]];
+    return `<span class="badge ${cls}">${text}</span>`;
+  }
+
+  function ledgerRows(r) {
+    const x = r.extraction, d = r.derived, cur = d.currency;
+    const rows = [];
+    const single = x.unit_rates.length === 1;
+    let sum = 0, complete = true;
+    x.unit_rates.forEach((rate, i) => {
+      const n = d.unit_rates[i] || {};
+      const kwh = rate.kwh ?? (single ? x.consumption_kwh : null);
+      const amount = isNum(n.per_kwh) && isNum(kwh) ? n.per_kwh * kwh : null;
+      if (amount === null) complete = false; else sum += amount;
+      rows.push(`<tr><td>${esc(rate.label || "Unit rate")}</td><td class="mono">${isNum(kwh) ? num(kwh) + " kWh × " : ""}${esc(num(rate.rate))} ${esc(rate.rate_unit)}</td><td class="mono">${dash(money(amount, cur))}</td></tr>`);
+    });
+    if (isNum(x.standing_charge)) {
+      const amount = isNum(d.standing_charge_per_day) && d.period_days ? d.standing_charge_per_day * d.period_days : null;
+      if (amount === null) complete = false; else sum += amount;
+      rows.push(`<tr><td>Standing charge</td><td class="mono">${d.period_days ? d.period_days + " days × " : ""}${esc(num(x.standing_charge))} ${esc(x.standing_charge_unit || "")}</td><td class="mono">${dash(money(amount, cur))}</td></tr>`);
+    }
+    if (rows.length && complete) rows.push(`<tr class="computed"><td>Calculated</td><td>From the rates above</td><td class="mono">${money(sum, cur)}</td></tr>`);
+    rows.push(`<tr><td>Before VAT</td><td>As printed on the bill</td><td class="mono">${dash(money(x.subtotal_excl_tax, cur))}</td></tr>`);
+    rows.push(`<tr><td>VAT</td><td></td><td class="mono">${dash(money(x.tax_amount, cur))}</td></tr>`);
+    rows.push(`<tr class="total"><td>Total for this period</td><td></td><td class="mono">${dash(money(x.total_amount, cur))}</td></tr>`);
+    return rows.join("");
+  }
+
+  function render(r, mode) {
+    const done = mode === "done";
+    const x = done ? r.extraction : {};
+    const d = done ? r.derived : {};
+    const checks = done ? Object.fromEntries(r.checks.map((c) => [c.name, c])) : {};
+    const period = done && x.billing_period_start
+      ? `${date(x.billing_period_start)} – ${date(x.billing_period_end) ?? "?"}` : null;
+
+    const intro = mode === "empty"
+      ? `<p class="note">Choose a bill or a sample. Its fields appear here, with every check the numbers went through.</p>`
+      : mode === "loading"
+        ? `<p class="note">Reading the bill and checking the numbers. <span class="mono timer" id="elapsed">0.0 s</span></p>`
+        : "";
+
+    const review = done && r.needs_review ? `
+      <div class="callout callout-warn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17v.5"/></svg>
+        <div><h3>Check these before using the data</h3><ul>${r.checks.filter((c) => c.status === "fail").map((c) => `<li><strong>${esc(CHECK_NAMES[c.name] || c.name)}:</strong> ${esc(c.detail)}</li>`).join("")}</ul></div>
+      </div>` : "";
+
+    const counts = done ? ["pass", "fail", "skipped"].map((s) => r.checks.filter((c) => c.status === s).length) : null;
+    const checkList = done
+      ? r.checks.map((c) => `<li><span class="pill pill-${c.status}">${c.status === "fail" ? "Failed" : c.status === "pass" ? "Passed" : "Skipped"}</span><span class="what">${esc(CHECK_NAMES[c.name] || c.name)}</span><span class="why">${esc(c.detail)}</span></li>`).join("")
+      : Object.values(CHECK_NAMES).slice(0, 4).map((name, i) => `<li><span>${ph(56)}</span><span class="what" style="color:var(--muted)">${esc(name)}</span><span>${ph(140 + i * 30)}</span></li>`).join("");
+
+    const ledger = done ? ledgerRows(r)
+      : ["Unit rate", "Standing charge", "Before VAT", "VAT"].map((l) => `<tr><td style="color:var(--muted)">${l}</td><td>${ph(120)}</td><td>${ph(56)}</td></tr>`).join("")
+        + `<tr class="total"><td style="color:var(--muted)">Total for this period</td><td></td><td>${ph(64)}</td></tr>`;
+
+    const costBadge = done ? (() => {
+      const a = checks.cost_reconciles, b = checks.total_reconciles;
+      if (!a || !b) return "";
+      if (a.status === "fail" || b.status === "fail") return `<span class="badge badge-warn">Doesn't add up</span>`;
+      if (a.status === "pass" && b.status === "pass") return `<span class="badge badge-pass">Adds up</span>`;
+      return `<span class="badge badge-idle">Partly checked</span>`;
+    })() : "";
+
+    const meta = done ? `
+      <dl class="run">
+        <div><dt>Model</dt><dd class="mono">${esc(r.meta.model)}</dd></div>
+        <div><dt>Time</dt><dd class="mono">${(r.meta.latency_ms / 1000).toFixed(1)} s</dd></div>
+        <div><dt>Attempts</dt><dd class="mono">${r.meta.attempts}</dd></div>
+        <div><dt>Pages read</dt><dd class="mono">${r.meta.pages_sent} of ${r.meta.pages_in_file}</dd></div>
+        ${r.meta.input_tokens ? `<div><dt>Tokens</dt><dd class="mono">${num(r.meta.input_tokens)} in, ${num(r.meta.output_tokens)} out</dd></div>` : ""}
+        <div><dt>Request</dt><dd class="mono">${esc(r.meta.request_id)}</dd></div>
+      </dl>` : "";
+
+    const show = (v, w) => done ? dash(v) : ph(w);
+    els.fields.className = `result-body${mode === "loading" ? " is-loading" : ""}${done ? " reveal" : ""}`;
+    els.fields.innerHTML = `
+      ${intro}
+      ${review}
+      <div class="cells">
+        <div class="cell"><span class="label">Supplier</span><div class="value">${show(x.supplier_name, 110)}</div></div>
+        <div class="cell"><span class="label">Account number</span><div class="value mono">${show(x.account_number, 90)}</div></div>
+        <div class="cell"><span class="label">Billing period</span><div class="value mono">${show(period, 130)}</div>${done && d.period_days ? `<div class="sub">${d.period_days} days</div>` : ""}</div>
+      </div>
+
+      <div class="block">
+        <div class="block-head"><span class="label">Supply number (MPAN)</span>${done ? checkBadge(checks.meter_point_checksum, ["Check digit valid", "Check digit wrong", "Not checked"]) : ""}</div>
+        ${mpanCells(done ? x.meter_point_id : null)}
+        <dl class="facts">
+          <div><dt>Meter serial</dt><dd class="mono">${show(x.meter_serial, 90)}</dd></div>
+          <div><dt>Reading</dt><dd>${show(cap(x.reading_type), 60)}</dd></div>
+          <div><dt>Tariff</dt><dd>${show(x.tariff_name, 120)}</dd></div>
+        </dl>
+      </div>
+
+      <div class="block">
+        <div class="block-head"><span class="label">Usage</span></div>
+        <dl class="facts">
+          <div><dt>Used this period</dt><dd class="mono">${done ? dash(isNum(x.consumption_kwh) ? num(x.consumption_kwh) + " kWh" : null) : ph(70)}</dd></div>
+          <div><dt>Average per day</dt><dd class="mono">${done ? dash(isNum(d.avg_daily_kwh) ? num(d.avg_daily_kwh, 1) + " kWh" : null) : ph(60)}</dd></div>
+          <div><dt>Estimated per year</dt><dd class="mono">${done ? dash(isNum(d.estimated_annual_kwh) ? num(d.estimated_annual_kwh, 0) + " kWh" : null) : ph(70)}${done && isNum(d.estimated_annual_kwh) ? `<span class="sub">Daily average × 365, ignores seasons</span>` : ""}</dd></div>
+        </dl>
+      </div>
+
+      <div class="block">
+        <div class="block-head"><span class="label">Charges</span>${costBadge}</div>
+        <table class="ledger"><tbody>${ledger}</tbody></table>
+      </div>
+
+      <div class="block">
+        <div class="block-head"><span class="label">Checks</span>${done ? `<span class="count">${counts[0]} passed, ${counts[1]} failed, ${counts[2]} skipped</span>` : ""}</div>
+        <ul class="checks">${checkList}</ul>
+      </div>
+      ${meta}`;
+    if (!done) showTab("fields");
+  }
+
+  render(null, "empty");
+})();
 </script>
 </body>
 </html>

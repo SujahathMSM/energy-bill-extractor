@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field("http://localhost:11434/v1", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field("qwen2.5vl:3b", alias="BILLX_OLLAMA_MODEL")
 
+    # Where `python -m bill_extractor` listens. docker compose publishes BILLX_PORT too.
+    host: str = Field("127.0.0.1", alias="BILLX_HOST")
+    port: int = Field(8000, alias="BILLX_PORT", ge=1, le=65535)
+
     # Input handling
     max_pages: int = Field(3, alias="BILLX_MAX_PAGES", ge=1, le=10)
     # 1568 px on the long side: Claude downscales anything larger anyway, and it is

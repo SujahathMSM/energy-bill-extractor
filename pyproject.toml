@@ -30,7 +30,7 @@ dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 include = ["bill_extractor*"]
 
 [tool.setuptools.package-data]
-bill_extractor = ["static/*"]
+bill_extractor = ["static/*", "static/samples/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

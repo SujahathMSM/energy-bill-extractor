@@ -71,11 +71,12 @@ flowchart LR
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-make run        # http://localhost:8000, using the mock backend (no API key needed)
+python -m bill_extractor   # mock backend, no API key needed
 ```
 
-Open http://localhost:8000, drop in a file from `samples/`, and you get the extracted fields
-and every check. API docs are at http://localhost:8000/docs.
+It listens on http://127.0.0.1:8000 by default; set `BILLX_PORT` in `.env` to change it.
+Open the page and drop in a bill, or click one of the sample bills. You get the extracted
+fields, the charges recalculated line by line, and every check. API docs are at `/docs`.
 
 To use a real model, copy `.env.example` to `.env` and set one of:
 
@@ -87,6 +88,10 @@ To use a real model, copy `.env.example` to `.env` and set one of:
 
 With Docker: `docker compose up --build`, or `docker compose --profile local up --build` to run
 Ollama alongside it.
+
+If port 8000 is already in use (Docker Desktop and WSL often hold it), set `BILLX_PORT=8010`
+in `.env`. Both `python -m bill_extractor` and `docker compose` use it; open
+http://127.0.0.1:8010.
 
 ## API
 
