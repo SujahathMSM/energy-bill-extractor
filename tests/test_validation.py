@@ -106,3 +106,64 @@ def test_monthly_fixed_charge_converts_to_daily():
         BillExtraction(currency="LKR", standing_charge=365.0, standing_charge_unit="LKR/month")
     )
     assert derived.standing_charge_per_day == pytest.approx(12.0)
+
+
+def _coop_bill(**changes) -> BillExtraction:
+    """Shaped like the Oklahoma Electric Cooperative sample: no unit rates, a Roundup line."""
+    fields = {
+        "supplier_name": "Oklahoma Electric Cooperative",
+        "account_number": "1234567",
+        "currency": "USD",
+        "billing_period_start": "2026-05-15",
+        "billing_period_end": "2026-06-15",
+        "period_days": 31,
+        "previous_reading": 12258,
+        "current_reading": 12512,
+        "consumption_kwh": 254,
+        "subtotal_excl_tax": 48.50,
+        "tax_amount": 0.97,
+        "other_charges": [{"label": "Roundup", "amount": 0.53}],
+        "total_amount": 50.00,
+    }
+    return BillExtraction.model_validate({**fields, **changes})
+
+
+def test_printed_day_count_wins_over_counting_dates():
+    derived, checks = analyse(_coop_bill())
+    assert derived.period_days == 31  # the dates span 32 counting both ends
+    period = next(c for c in checks if c.name == "billing_period")
+    assert period.status == "pass"
+    assert "31 days as printed" in period.detail
+    assert derived.avg_daily_kwh == round(254 / 31, 3)
+
+
+def test_day_count_without_printed_days_counts_both_ends():
+    derived, _ = analyse(_coop_bill(period_days=None))
+    assert derived.period_days == 32
+
+
+def test_printed_day_count_far_from_dates_is_flagged():
+    assert _statuses(_coop_bill(period_days=12))["billing_period"] == "fail"
+
+
+def test_printed_days_feed_the_derived_figures():
+    # Mock bill spans 30 days; a printed 29 wins.
+    assert _statuses(_mock())["cost_reconciles"] == "pass"
+    derived, _ = analyse(_mock(period_days=29))
+    assert derived.period_days == 29
+
+
+def test_other_charges_reconcile_the_total():
+    statuses = _statuses(_coop_bill())
+    assert statuses["total_reconciles"] == "pass"
+    # Only the genuinely missing unit rates remain flagged.
+    assert [name for name, status in statuses.items() if status == "fail"] == ["onboarding_fields"]
+
+
+def test_missing_other_charge_still_fails_the_total():
+    assert _statuses(_coop_bill(other_charges=[]))["total_reconciles"] == "fail"
+
+
+def test_credit_as_negative_other_charge():
+    bill = _coop_bill(other_charges=[{"label": "Discount", "amount": -1.00}], total_amount=48.47)
+    assert _statuses(bill)["total_reconciles"] == "pass"

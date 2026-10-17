@@ -118,3 +118,21 @@ def test_failed_run_reports_why(dataset, tmp_path):
     assert summary["error_messages"][0][1] == 2
     _, markdown = write_reports(results, FailingBackend(), tmp_path)
     assert "2x BackendError: Claude request failed: Error code: 401" in markdown
+
+
+def test_other_charges_compare_by_amount():
+    from bill_extractor.scoring import compare_other_charges
+
+    def bill(*amounts):
+        return BillExtraction(other_charges=[{"label": f"x{a}", "amount": a} for a in amounts])
+
+    assert compare_other_charges(bill(), bill()) == "correct"
+    assert compare_other_charges(bill(), bill(0.53)) == "hallucinated"
+    assert compare_other_charges(bill(0.53), bill()) == "missed"
+    assert compare_other_charges(bill(0.53, -1.0), bill(-1.0, 0.53)) == "correct"
+    assert compare_other_charges(bill(0.53), bill(0.35)) == "wrong"
+
+
+def test_new_fields_are_scored():
+    assert "period_days" in ALL_FIELDS
+    assert "other_charges" in ALL_FIELDS

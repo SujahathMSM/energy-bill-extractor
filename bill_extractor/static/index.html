@@ -181,6 +181,7 @@
   .mpan span { padding: 10px 14px; font: 500 16px/24px var(--mono); letter-spacing: .02em; border-right: 1px solid var(--line); min-width: 52px; text-align: center; }
   .mpan span:last-child { border-right: 0; }
   .mpan.raw span { min-width: 0; }
+  .not-printed { color: var(--muted); font-size: 14px; line-height: 24px; }
 
   .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0; }
   .facts div { min-width: 0; }
@@ -514,7 +515,7 @@
     readings_match_consumption: "Meter readings match usage",
     bands_match_consumption: "Rate bands add up to usage",
     cost_reconciles: "Charges add up to the subtotal",
-    total_reconciles: "Subtotal plus VAT equals the total",
+    total_reconciles: "Subtotal plus tax equals the total",
     meter_point_checksum: "MPAN check digit",
   };
   const SYMBOLS = { GBP: "£", EUR: "€", USD: "$" };
@@ -683,7 +684,8 @@
   }
 
   // ---------- rendering ----------
-  function mpanCells(id) {
+  function mpanCells(id, done) {
+    if (!id && done) return `<p class="not-printed">Not printed on this bill</p>`;
     if (!id) return `<div class="mpan">${[0, 1, 2, 3].map(() => `<span>${ph(28)}</span>`).join("")}</div>`;
     const digits = id.replace(/\D/g, "");
     const core = digits.length === 21 ? digits.slice(-13) : digits;
@@ -697,8 +699,19 @@
     return `<span class="badge ${cls}">${text}</span>`;
   }
 
+  const taxWord = (cur) => cur === "GBP" ? "VAT" : "Tax";
+
+  function checkNames(r) {
+    const cur = r.derived.currency, other = (r.extraction.other_charges || []).length;
+    return {
+      ...CHECK_NAMES,
+      total_reconciles: `Subtotal plus ${taxWord(cur) === "VAT" ? "VAT" : "tax"}${other ? " and other charges" : ""} equals the total`,
+      meter_point_checksum: cur === "GBP" || !cur ? "MPAN check digit" : "Supply number check digit",
+    };
+  }
+
   function ledgerRows(r) {
-    const x = r.extraction, d = r.derived, cur = d.currency;
+    const x = r.extraction, d = r.derived, cur = d.currency, tax = taxWord(cur);
     const rows = [];
     const single = x.unit_rates.length === 1;
     let sum = 0, complete = true;
@@ -715,8 +728,11 @@
       rows.push(`<tr><td>Standing charge</td><td class="mono">${d.period_days ? d.period_days + " days × " : ""}${esc(num(x.standing_charge))} ${esc(x.standing_charge_unit || "")}</td><td class="mono">${dash(money(amount, cur))}</td></tr>`);
     }
     if (rows.length && complete) rows.push(`<tr class="computed"><td>Calculated</td><td>From the rates above</td><td class="mono">${money(sum, cur)}</td></tr>`);
-    rows.push(`<tr><td>Before VAT</td><td>As printed on the bill</td><td class="mono">${dash(money(x.subtotal_excl_tax, cur))}</td></tr>`);
-    rows.push(`<tr><td>VAT</td><td></td><td class="mono">${dash(money(x.tax_amount, cur))}</td></tr>`);
+    rows.push(`<tr><td>Before ${tax === "VAT" ? "VAT" : "tax"}</td><td>As printed on the bill</td><td class="mono">${dash(money(x.subtotal_excl_tax, cur))}</td></tr>`);
+    rows.push(`<tr><td>${tax}</td><td></td><td class="mono">${dash(money(x.tax_amount, cur))}</td></tr>`);
+    (x.other_charges || []).forEach((c) => {
+      rows.push(`<tr><td>${esc(c.label)}</td><td>Other charge, as printed</td><td class="mono">${dash(money(c.amount, cur))}</td></tr>`);
+    });
     rows.push(`<tr class="total"><td>Total for this period</td><td></td><td class="mono">${dash(money(x.total_amount, cur))}</td></tr>`);
     return rows.join("");
   }
@@ -726,6 +742,8 @@
     const x = done ? r.extraction : {};
     const d = done ? r.derived : {};
     const checks = done ? Object.fromEntries(r.checks.map((c) => [c.name, c])) : {};
+    const names = done ? checkNames(r) : CHECK_NAMES;
+    const gb = !done || !d.currency || d.currency === "GBP";
     const period = done && x.billing_period_start
       ? `${date(x.billing_period_start)} – ${date(x.billing_period_end) ?? "?"}` : null;
 
@@ -738,16 +756,16 @@
     const review = done && r.needs_review ? `
       <div class="callout callout-warn">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17v.5"/></svg>
-        <div><h3>Check these before using the data</h3><ul>${r.checks.filter((c) => c.status === "fail").map((c) => `<li><strong>${esc(CHECK_NAMES[c.name] || c.name)}:</strong> ${esc(c.detail)}</li>`).join("")}</ul></div>
+        <div><h3>Check these before using the data</h3><ul>${r.checks.filter((c) => c.status === "fail").map((c) => `<li><strong>${esc(names[c.name] || c.name)}:</strong> ${esc(c.detail)}</li>`).join("")}</ul></div>
       </div>` : "";
 
     const counts = done ? ["pass", "fail", "skipped"].map((s) => r.checks.filter((c) => c.status === s).length) : null;
     const checkList = done
-      ? r.checks.map((c) => `<li><span class="pill pill-${c.status}">${c.status === "fail" ? "Failed" : c.status === "pass" ? "Passed" : "Skipped"}</span><span class="what">${esc(CHECK_NAMES[c.name] || c.name)}</span><span class="why">${esc(c.detail)}</span></li>`).join("")
+      ? r.checks.map((c) => `<li><span class="pill pill-${c.status}">${c.status === "fail" ? "Failed" : c.status === "pass" ? "Passed" : "Skipped"}</span><span class="what">${esc(names[c.name] || c.name)}</span><span class="why">${esc(c.detail)}</span></li>`).join("")
       : Object.values(CHECK_NAMES).slice(0, 4).map((name, i) => `<li><span>${ph(56)}</span><span class="what" style="color:var(--muted)">${esc(name)}</span><span>${ph(140 + i * 30)}</span></li>`).join("");
 
     const ledger = done ? ledgerRows(r)
-      : ["Unit rate", "Standing charge", "Before VAT", "VAT"].map((l) => `<tr><td style="color:var(--muted)">${l}</td><td>${ph(120)}</td><td>${ph(56)}</td></tr>`).join("")
+      : ["Unit rate", "Standing charge", "Before tax", "Tax"].map((l) => `<tr><td style="color:var(--muted)">${l}</td><td>${ph(120)}</td><td>${ph(56)}</td></tr>`).join("")
         + `<tr class="total"><td style="color:var(--muted)">Total for this period</td><td></td><td>${ph(64)}</td></tr>`;
 
     const costBadge = done ? (() => {
@@ -780,8 +798,8 @@
       </div>
 
       <div class="block">
-        <div class="block-head"><span class="label">Supply number (MPAN)</span>${done ? checkBadge(checks.meter_point_checksum, ["Check digit valid", "Check digit wrong", "Not checked"]) : ""}</div>
-        ${mpanCells(done ? x.meter_point_id : null)}
+        <div class="block-head"><span class="label">${gb ? "Supply number (MPAN)" : "Supply number"}</span>${done && x.meter_point_id ? checkBadge(checks.meter_point_checksum, ["Check digit valid", "Check digit wrong", "Not checked"]) : ""}</div>
+        ${mpanCells(done ? x.meter_point_id : null, done)}
         <dl class="facts">
           <div><dt>Meter serial</dt><dd class="mono">${show(x.meter_serial, 90)}</dd></div>
           <div><dt>Reading</dt><dd>${show(cap(x.reading_type), 60)}</dd></div>

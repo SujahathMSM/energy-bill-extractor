@@ -18,6 +18,7 @@ SCALAR_FIELDS = [
     "currency",
     "billing_period_start",
     "billing_period_end",
+    "period_days",
     "previous_reading",
     "current_reading",
     "reading_type",
@@ -27,7 +28,7 @@ SCALAR_FIELDS = [
     "tax_amount",
     "total_amount",
 ]
-ALL_FIELDS = [*SCALAR_FIELDS, "unit_rates"]
+ALL_FIELDS = [*SCALAR_FIELDS, "unit_rates", "other_charges"]
 _ID_FIELDS = {"account_number", "meter_point_id", "meter_serial"}
 _READING_TYPES = {"a": "actual", "e": "estimated", "s": "smart", "c": "customer"}
 
@@ -94,12 +95,27 @@ def compare_rates(truth: BillExtraction, pred: BillExtraction) -> str:
     return "correct"
 
 
+def compare_other_charges(truth: BillExtraction, pred: BillExtraction) -> str:
+    """Other charges match when the amounts match one for one; labels vary too much to score."""
+    if not truth.other_charges:
+        return "correct" if not pred.other_charges else "hallucinated"
+    if not pred.other_charges:
+        return "missed"
+    t_amounts = sorted(c.amount for c in truth.other_charges)
+    p_amounts = sorted(c.amount for c in pred.other_charges)
+    if len(t_amounts) != len(p_amounts):
+        return "wrong"
+    ok = all(_num_equal(p, t) for t, p in zip(t_amounts, p_amounts, strict=True))
+    return "correct" if ok else "wrong"
+
+
 def score_fields(truth: BillExtraction, pred: BillExtraction) -> dict[str, str]:
     outcomes = {
         name: compare_scalar(name, getattr(truth, name), getattr(pred, name))
         for name in SCALAR_FIELDS
     }
     outcomes["unit_rates"] = compare_rates(truth, pred)
+    outcomes["other_charges"] = compare_other_charges(truth, pred)
     return outcomes
 
 

@@ -24,6 +24,13 @@ class UnitRate(BaseModel):
     kwh: float | None = Field(None, description="kWh charged at this rate, if shown.")
 
 
+class OtherCharge(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    label: str = Field(description='Line as printed, e.g. "Roundup", "Fuel adjustment", "SSCL".')
+    amount: float = Field(description="Amount as printed; negative for a credit or discount.")
+
+
 class BillExtraction(BaseModel):
     """Fields read from one electricity bill. Use null for anything not printed on the bill."""
 
@@ -43,6 +50,9 @@ class BillExtraction(BaseModel):
     currency: str | None = Field(None, description="ISO 4217 currency code, e.g. GBP.")
     billing_period_start: date | None = Field(None, description="First day of the bill period.")
     billing_period_end: date | None = Field(None, description="Last day of the bill period.")
+    period_days: int | None = Field(
+        None, description="Number of days in the bill period, only if printed on the bill."
+    )
     previous_reading: float | None = Field(
         None, description="Previous cumulative meter reading (single-register meters only)."
     )
@@ -66,11 +76,18 @@ class BillExtraction(BaseModel):
         None, description="This period's energy + standing charges before tax."
     )
     tax_amount: float | None = Field(None, description="Tax (e.g. VAT) on this period's charges.")
+    other_charges: list[OtherCharge] = Field(
+        default_factory=list,
+        description=(
+            "This period's charge lines that are neither energy, standing charge nor tax "
+            "(levies, adjustments, roundup donations, discounts), each with its amount."
+        ),
+    )
     total_amount: float | None = Field(
         None,
         description=(
-            "This period's charges including tax. Not the amount due if that includes "
-            "a previous balance, payments or credits."
+            "This period's charges including tax and other charge lines. Not the amount due "
+            "if that includes a previous balance, payments or credits."
         ),
     )
 
@@ -83,7 +100,9 @@ class NormalisedRate(BaseModel):
 
 class Derived(BaseModel):
     currency: str | None
-    period_days: int | None
+    period_days: int | None = Field(
+        description="Printed day count when shown, otherwise both end dates counted."
+    )
     unit_rates: list[NormalisedRate]
     standing_charge_per_day: float | None = Field(description="Major currency units per day.")
     avg_daily_kwh: float | None

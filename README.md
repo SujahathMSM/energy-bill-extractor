@@ -29,6 +29,10 @@ flowchart LR
 - **The model reads, code calculates.** The model copies values as printed (`24.86`, `"p/kWh"`).
   Unit conversion, period length and the annual-use estimate happen in Python. Models are good
   at reading and unreliable at arithmetic.
+- **What is printed wins.** Suppliers count billing days differently (both end dates, or
+  nights), so a printed day count is used for the standing-charge maths instead of one counted
+  from the dates. Extra charge lines such as levies or a roundup donation are read into
+  `other_charges` so the total still reconciles.
 - **Null rather than a guess.** The prompt and schema make "not printed on the bill" an explicit
   answer, and the evaluation counts invented values separately from missed ones.
 - **JSON from Claude that works with any model.** By default the schema goes into the prompt
@@ -52,13 +56,13 @@ flowchart LR
   | Check | What it catches |
   |---|---|
   | `cost_reconciles` | Rates x kWh + standing charge differs from the subtotal: a misread rate or kWh, or pence read as pounds |
-  | `total_reconciles` | Subtotal + VAT differs from the total |
+  | `total_reconciles` | Subtotal + tax + other charge lines (levies, adjustments, roundups, credits) differs from the total |
   | `readings_match_consumption` | Current reading - previous reading differs from kWh used |
   | `bands_match_consumption` | Day + night kWh differs from total kWh |
   | `rates_plausible` | A unit rate outside a sane range for the currency |
   | `meter_point_checksum` | The GB MPAN check digit fails: a digit was misread |
   | `currency_consistent` | The units imply a different currency from the one stated |
-  | `billing_period` | The period ends before it starts, or is implausibly long |
+  | `billing_period` | The period ends before it starts, is implausibly long, or the printed day count disagrees with the dates |
   | `onboarding_fields` | Something needed to set up the customer is missing |
 
 - **Nothing is stored.** Bills are personal data. Files are processed in memory, and each
@@ -188,7 +192,7 @@ used with consent, more layouts, and worse photos.
 
 ## Tests
 
-`make test` runs 78 tests without network access or API keys. They cover:
+`make test` runs 94 tests without network access or API keys. They cover:
 
 - Preprocessing.
 - Every check, including that the generator's ground truth passes all of them.

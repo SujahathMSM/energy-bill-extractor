@@ -141,11 +141,14 @@ def analyse(ex: BillExtraction) -> tuple[Derived, list[Check]]:
         unparsed.append(ex.standing_charge_unit)
 
     # --- derived figures ----------------------------------------------------------------
-    period_days = None
+    counted_days = None
     if ex.billing_period_start and ex.billing_period_end:
         delta = (ex.billing_period_end - ex.billing_period_start).days
         if delta >= 0:
-            period_days = delta + 1  # bills count both the first and last day
+            counted_days = delta + 1  # most bills count both the first and last day
+    # Suppliers differ (some count nights, not days), so a printed day count wins.
+    printed_days = ex.period_days if ex.period_days and ex.period_days > 0 else None
+    period_days = printed_days or counted_days
 
     rates = [
         NormalisedRate(
@@ -187,13 +190,25 @@ def analyse(ex: BillExtraction) -> tuple[Derived, list[Check]]:
         add("onboarding_fields", "pass", "All fields needed for onboarding are present.")
 
     if not (ex.billing_period_start and ex.billing_period_end):
-        add("billing_period", "skipped", "Start or end date missing.")
-    elif period_days is None:
+        if printed_days:
+            add("billing_period", "skipped", f"{printed_days} days printed; dates missing.")
+        else:
+            add("billing_period", "skipped", "Start or end date missing.")
+    elif counted_days is None:
         add("billing_period", "fail", "Period ends before it starts.")
     elif period_days > 400:
         add("billing_period", "fail", f"Period of {period_days} days is implausibly long.")
+    elif printed_days is None:
+        add("billing_period", "pass", f"{period_days} days, counting both end dates.")
+    elif abs(printed_days - counted_days) <= 1:
+        note = "" if printed_days == counted_days else f" (dates span {counted_days} counting both)"
+        add("billing_period", "pass", f"{printed_days} days as printed{note}.")
     else:
-        add("billing_period", "pass", f"{period_days} days.")
+        add(
+            "billing_period",
+            "fail",
+            f"Bill prints {printed_days} days but the dates span {counted_days}.",
+        )
 
     if unparsed or not_per_kwh:
         problems = [f"'{u}' not understood" for u in unparsed]
@@ -292,14 +307,19 @@ def analyse(ex: BillExtraction) -> tuple[Derived, list[Check]]:
     if None in (ex.subtotal_excl_tax, ex.tax_amount, ex.total_amount):
         add("total_reconciles", "skipped", "Subtotal, tax or total missing.")
     else:
-        expected_total = ex.subtotal_excl_tax + ex.tax_amount
+        other = sum(c.amount for c in ex.other_charges)
+        expected_total = ex.subtotal_excl_tax + ex.tax_amount + other
+        parts = "subtotal + tax"
+        if ex.other_charges:
+            n = len(ex.other_charges)
+            parts += f" + {n} other charge{'s' if n != 1 else ''} ({other:.2f})"
         if _close(expected_total, ex.total_amount, abs_tol=0.02):
-            add("total_reconciles", "pass", f"{expected_total:.2f} = subtotal + tax.")
+            add("total_reconciles", "pass", f"{expected_total:.2f} = {parts}.")
         else:
             add(
                 "total_reconciles",
                 "fail",
-                f"Subtotal + tax = {expected_total:.2f}, but total is {ex.total_amount:.2f}.",
+                f"{parts.capitalize()} = {expected_total:.2f}, but total is {ex.total_amount:.2f}.",
             )
 
     core = mpan_core(ex.meter_point_id)

@@ -156,6 +156,7 @@ def make_bill(index: int, rng: random.Random) -> SyntheticBill:
         currency="GBP",
         billing_period_start=start,
         billing_period_end=end,
+        period_days=days,  # every layout prints it on the standing-charge line
         previous_reading=previous,
         current_reading=current,
         reading_type=reading_type,

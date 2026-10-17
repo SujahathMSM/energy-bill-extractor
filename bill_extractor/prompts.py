@@ -17,14 +17,19 @@ never calculate a value that is not printed. The one exception: give the ISO cur
 implied by symbols (for example £ means GBP).
 3. Write dates as YYYY-MM-DD.
 4. Write numbers without currency symbols, units or thousands separators.
-5. total_amount is this period's charges including tax. If the bill also shows an amount due \
-that includes a previous balance, payments or credits, do not use that figure.
+5. total_amount is this period's charges including tax and any other charge lines. If the \
+bill also shows an amount due that includes a previous balance, payments or credits, do not \
+use that figure.
 6. Fill previous_reading and current_reading only for a single cumulative meter register. \
 If the bill shows several registers (for example day and night) or no cumulative readings, \
 use null for both.
 7. Add one unit_rates entry for each unit rate charged, with the kWh charged at that rate \
 when it is shown.
-8. If there are several pages, combine what they show into one answer.
+8. Fill period_days only if the bill prints the number of days; never count it yourself.
+9. Put any other charge line for this period (levies, fuel or price adjustments, roundup \
+donations, discounts) in other_charges with its amount as printed; use a negative amount for \
+a credit. Do not put energy, standing charges, tax, previous balances or payments there.
+10. If there are several pages, combine what they show into one answer.
 """
 
 
