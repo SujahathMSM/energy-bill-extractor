@@ -146,6 +146,12 @@ or image), 422 (the model's answer never matched the schema) and 502 (provider e
 annual usage and estimates what switching would save. This is the onboarding
 pitch: read the old bill, then show the customer what they would pay elsewhere.
 
+The demo page shows the same comparison after an extraction: a Switching
+savings block with target rate, standing charge and name pre-filled (20p/kWh
+and 40p/day for GBP bills), a Compare button, and the annual/monthly saving
+with a per-band breakdown. A bill with no unit rates shows that the saving
+cannot be estimated instead of inventing one.
+
 ```bash
 curl -X POST http://localhost:8000/v1/savings -H "Content-Type: application/json" -d '{
   "extraction": {
@@ -325,10 +331,9 @@ tests/
   not yet supported.
 - The annual-use estimate is average daily use x 365, so it is skewed by the season the bill
   covers.
-- Savings is API-only so far; the demo page does not yet show it.
-- Possible next steps: demo-page savings UI, source locations for each field so a
-  reviewer can jump to it, a cost and latency comparison across models, and turning
-  reviewed corrections into new evaluation cases.
+- Possible next steps: source locations for each field so a reviewer can jump to it, a
+  cost and latency comparison across models, and turning reviewed corrections into new
+  evaluation cases.
 
 ## License
 

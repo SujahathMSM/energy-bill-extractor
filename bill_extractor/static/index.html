@@ -189,6 +189,18 @@
   .facts dd { margin: 2px 0 0; font-weight: 500; overflow-wrap: anywhere; }
   .facts dd .sub { display: block; font: 400 12px/16px var(--sans); color: var(--muted); letter-spacing: 0; }
 
+  .savings-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .savings-form .field { display: grid; gap: 4px; }
+  .savings-form .field-wide { grid-column: 1 / -1; }
+  .savings-form label { font-size: 12px; color: var(--muted); }
+  .savings-form input { height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--card); color: var(--ink); font: 400 14px/1 var(--sans); width: 100%; }
+  .savings-form input:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
+  .savings-hero { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.02em; margin: 0; }
+  .savings-hero.negative { color: var(--err-ink); }
+  .savings-sub { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+  .savings-note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+  .savings-err { color: var(--err-ink); font-size: 13px; }
+
   .ledger { width: 100%; border-collapse: collapse; }
   .ledger td { padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
   .ledger td:nth-child(2) { color: var(--muted); padding-left: 12px; }
@@ -504,7 +516,7 @@
     limits: $("limits"), shortcut: $("shortcut"),
   };
   const samples = [...document.querySelectorAll(".sample")];
-  const state = { file: null, objectUrl: null, busy: false, maxBytes: 10 * 1024 * 1024, timer: null };
+  const state = { file: null, objectUrl: null, busy: false, maxBytes: 10 * 1024 * 1024, timer: null, lastResult: null, savingsBusy: false };
 
   const CHECK_NAMES = {
     onboarding_fields: "Fields needed for sign-up",
@@ -662,6 +674,7 @@
         throw new Error(id ? `${detail} Request ID: ${id}.` : detail);
       }
       els.jsonOut.textContent = JSON.stringify(data, null, 2);
+      state.lastResult = data;
       render(data, "done");
       const failed = data.checks.filter((c) => c.status === "fail").length;
       setStatus(data.needs_review ? "warn" : "pass", data.needs_review ? `Needs review: ${failed} check${failed === 1 ? "" : "s"} failed` : "All checks passed");
@@ -681,6 +694,94 @@
         <div><h3>The bill couldn't be read</h3><p>${esc(message)}</p></div>
       </div>`;
     showTab("fields");
+  }
+
+  // ---------- switching savings ----------
+  function savingsDefaults(cur) {
+    if (cur === "USD") return { name: "Target tariff", rate: "15", rateUnit: "c/kWh", standing: "50", standingUnit: "c/day" };
+    if (cur === "EUR") return { name: "Target tariff", rate: "20", rateUnit: "c/kWh", standing: "40", standingUnit: "c/day" };
+    return { name: "Target tariff", rate: "20", rateUnit: "p/kWh", standing: "40", standingUnit: "p/day" };
+  }
+
+  function savingsForm(r) {
+    const d = savingsDefaults(r.derived.currency);
+    return `
+      <div class="block" id="savings-block">
+        <div class="block-head"><span class="label">Switching savings</span><span class="count">Costs exclude tax</span></div>
+        <p class="note">Compare this bill with a target tariff on the same annual usage.</p>
+        <div class="savings-form">
+          <div class="field field-wide"><label for="savings-name">Target tariff name</label><input id="savings-name" type="text" value="${esc(d.name)}"></div>
+          <div class="field"><label for="savings-rate">Target unit rate</label><input id="savings-rate" type="number" min="0" step="any" inputmode="decimal" value="${esc(d.rate)}"></div>
+          <div class="field"><label for="savings-rate-unit">Rate unit</label><input id="savings-rate-unit" type="text" value="${esc(d.rateUnit)}"></div>
+          <div class="field"><label for="savings-standing">Target standing charge</label><input id="savings-standing" type="number" min="0" step="any" inputmode="decimal" value="${esc(d.standing)}"></div>
+          <div class="field"><label for="savings-standing-unit">Standing charge unit</label><input id="savings-standing-unit" type="text" value="${esc(d.standingUnit)}"></div>
+        </div>
+        <div><button class="btn btn-secondary" type="button" id="savings-compare">Compare to target tariff</button></div>
+        <div id="savings-out"></div>
+      </div>`;
+  }
+
+  async function compareSavings() {
+    const out = $("savings-out");
+    const btn = $("savings-compare");
+    if (!state.lastResult || state.savingsBusy) return;
+    const rate = parseFloat($("savings-rate").value);
+    const standing = parseFloat($("savings-standing").value);
+    const rateUnit = $("savings-rate-unit").value.trim();
+    const standingUnit = $("savings-standing-unit").value.trim();
+    if (!Number.isFinite(rate) || !rateUnit) { out.innerHTML = `<p class="savings-err">Enter a target unit rate and its unit.</p>`; return; }
+    if (!Number.isFinite(standing)) { out.innerHTML = `<p class="savings-err">Enter a target standing charge (0 if none).</p>`; return; }
+    state.savingsBusy = true; btn.disabled = true; btn.textContent = "Comparing…";
+    out.innerHTML = `<p class="note">Comparing tariffs…</p>`;
+    try {
+      const res = await fetch("/v1/savings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          extraction: state.lastResult.extraction,
+          derived: state.lastResult.derived,
+          needs_review: state.lastResult.needs_review,
+          target: {
+            name: $("savings-name").value.trim() || "Target tariff",
+            currency: state.lastResult.derived.currency || null,
+            unit_rates: [{ rate, rate_unit: rateUnit }],
+            standing_charge: standing,
+            standing_charge_unit: standingUnit,
+          },
+        }),
+      });
+      let data = null;
+      try { data = await res.json(); } catch { /* non-JSON error page */ }
+      if (!res.ok) {
+        const detail = data && typeof data.detail === "string" ? data.detail : `The server returned ${res.status}.`;
+        if (/no usable unit rates/i.test(detail)) {
+          out.innerHTML = `<p class="savings-err">Saving cannot be estimated — no unit rates printed on this bill.</p>`;
+        } else {
+          out.innerHTML = `<p class="savings-err">${esc(detail)}</p>`;
+        }
+        return;
+      }
+      const cur = data.currency;
+      const hero = data.saving_annual >= 0
+        ? `You could save ${money(data.saving_annual, cur)} a year`
+        : `This tariff would cost ${money(Math.abs(data.saving_annual), cur)} more a year`;
+      const rows = data.bands.map((b) => `<tr><td>${esc(b.label || "Unit rate")}</td><td class="mono">${num(b.annual_kwh, 1)} kWh × year</td><td class="mono">${dash(money(b.current_cost, cur))} → ${dash(money(b.target_cost, cur))}</td></tr>`).join("");
+      out.innerHTML = `
+        <p class="savings-hero${data.saving_annual < 0 ? " negative" : ""}">${esc(hero)}</p>
+        <p class="savings-sub">${money(data.saving_monthly, cur)} a month${data.saving_pct !== null ? ` · ${num(data.saving_pct, 1)}% of your current annual cost` : ""} · ${num(data.annual_kwh, 0)} kWh a year</p>
+        <dl class="facts" style="margin-top:12px">
+          <div><dt>Current annual cost</dt><dd class="mono">${dash(money(data.current.total, cur))}</dd></div>
+          <div><dt>Target annual cost</dt><dd class="mono">${dash(money(data.target.total, cur))}</dd></div>
+          <div><dt>Target tariff</dt><dd>${esc(data.target_name || "Target tariff")}</dd></div>
+        </dl>
+        ${rows ? `<table class="ledger" style="margin-top:12px"><tbody>${rows}</tbody></table>` : ""}
+        ${data.warnings.length ? `<p class="savings-note">${data.warnings.map((w) => esc(w)).join("<br>")}</p>` : ""}
+        <p class="savings-note">${data.assumptions.map((a) => esc(a)).join(" ")}</p>`;
+    } catch {
+      out.innerHTML = `<p class="savings-err">The comparison failed. Check that the server is running.</p>`;
+    } finally {
+      state.savingsBusy = false; btn.disabled = false; btn.textContent = "Compare to target tariff";
+    }
   }
 
   // ---------- rendering ----------
@@ -787,6 +888,7 @@
       </dl>` : "";
 
     const show = (v, w) => done ? dash(v) : ph(w);
+    const savings = done ? savingsForm(r) : "";
     els.fields.className = `result-body${mode === "loading" ? " is-loading" : ""}${done ? " reveal" : ""}`;
     els.fields.innerHTML = `
       ${intro}
@@ -821,11 +923,17 @@
         <table class="ledger"><tbody>${ledger}</tbody></table>
       </div>
 
+      ${savings}
+
       <div class="block">
         <div class="block-head"><span class="label">Checks</span>${done ? `<span class="count">${counts[0]} passed, ${counts[1]} failed, ${counts[2]} skipped</span>` : ""}</div>
         <ul class="checks">${checkList}</ul>
       </div>
       ${meta}`;
+    if (done) {
+      const compareBtn = document.getElementById("savings-compare");
+      if (compareBtn) compareBtn.addEventListener("click", () => compareSavings());
+    }
     if (!done) showTab("fields");
   }
 

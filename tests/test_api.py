@@ -67,6 +67,14 @@ def test_demo_page_is_served(client):
     assert "/static/logo.svg" in response.text
 
 
+def test_demo_page_has_savings_ui(client):
+    page = client.get("/").text
+    assert "Switching savings" in page
+    assert "savings-compare" in page
+    assert "Compare to target tariff" in page
+    assert "/v1/savings" in page
+
+
 def test_health_reports_upload_limits(client):
     limits = client.get("/health").json()["limits"]
     assert limits == {"max_upload_mb": 1.0, "max_pages": 3}
