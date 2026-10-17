@@ -4,7 +4,17 @@ Each bill is rendered three ways: a digital PDF, a PNG scan, and a "phone photo"
 (rotated, blurred, unevenly lit), so the evaluation shows how accuracy changes with input
 quality. Suppliers, people and addresses are fictional and every page is watermarked.
 
+Clean bills are internally consistent, so every check passes. Planted-fault bills
+(`--faulty N`) print one deliberate inconsistency -- a wrong total, a bad MPAN check
+digit, swapped readings, a day count that disagrees with the dates, a consumption
+figure that disagrees with the bands/readings, or no unit rate at all -- while the
+ground truth records exactly what is printed. A faithful extraction therefore still
+scores 100% on fields, but the checks must flag the bill for review. That is what
+makes the review-flag catch rate measurable: on clean bills the flag should stay
+off, on faulty bills it must turn on.
+
     python -m bill_extractor.synth --n 24 --out data/synthetic
+    python -m bill_extractor.synth --n 24 --faulty 12 --out data/synthetic
 """
 
 import argparse
@@ -39,6 +49,37 @@ TEMPLATES = ("single_rate", "economy7", "summary_first")
 DATE_STYLES = ("%d %b %Y", "%d %B %Y", "%d/%m/%Y")
 UNIT_STYLES = (("p/kWh", "p/day"), ("p per kWh", "p per day"), ("pence/kWh", "pence/day"))
 VAT_RATE = Decimal("0.05")  # UK domestic energy
+
+# Deliberate faults that can be planted in a printed bill. Each one targets one
+# check: the ground truth records what is printed (fault included), so a faithful
+# extraction still scores 100% on fields, but the checks must flag the bill.
+FAULT_TYPES = (
+    "wrong_total",
+    "bad_mpan",
+    "swapped_readings",
+    "wrong_period_days",
+    "wrong_consumption",
+    "missing_unit_rates",
+)
+FAULT_TO_CHECK = {
+    "wrong_total": "total_reconciles",
+    "bad_mpan": "meter_point_checksum",
+    "swapped_readings": "readings_match_consumption",
+    "wrong_period_days": "billing_period",
+    # Wrong consumption breaks both bands_match and (on metered bills)
+    # readings_match; bands_match fails on every template, so it is the expected one.
+    "wrong_consumption": "bands_match_consumption",
+    "missing_unit_rates": "onboarding_fields",
+}
+
+
+def applicable_faults(template: str) -> list[str]:
+    """Faults that can be printed on a bill of this template."""
+    if template == "economy7":
+        # Economy 7 bills have no cumulative readings to swap.
+        return [f for f in FAULT_TYPES if f != "swapped_readings"]
+    return list(FAULT_TYPES)
+
 
 WIDTH, HEIGHT = A4
 MARGIN = 42
@@ -80,13 +121,73 @@ class SyntheticBill:
     payments: Decimal
     amount_due: Decimal
     rate_decimals: int
+    fault: str | None = None
 
     def d(self, value: date) -> str:
         text = value.strftime(self.date_style)
         return text.lstrip("0") if self.date_style.startswith("%d ") else text
 
 
-def make_bill(index: int, rng: random.Random) -> SyntheticBill:
+def _apply_fault(bill: SyntheticBill, fault: str) -> None:
+    """Rewrite a clean bill so the printed page carries one deliberate inconsistency.
+
+    The ground truth is rewritten to match what is printed, fault included, so a
+    faithful extraction still scores 100% on fields. Other figures are kept
+    consistent where possible, so the fault targets one check.
+    """
+    if fault not in FAULT_TYPES:
+        raise ValueError(f"Unknown fault: {fault}")
+    bill.fault = fault
+    t = bill.truth
+    if fault == "wrong_total":
+        faulty_total = _money(Decimal(f"{t.total_amount:.2f}") + Decimal("5.00"))
+        t.total_amount = float(faulty_total)
+        bill.amount_due = bill.previous_balance - bill.payments + faulty_total
+    elif fault == "bad_mpan":
+        core = t.meter_point_id
+        for delta in (1, 2, 3):
+            candidate = core[:5] + str((int(core[5]) + delta) % 10) + core[6:]
+            if mpan_check_digit(candidate[:12]) != int(candidate[12]):
+                t.meter_point_id = candidate
+                break
+        else:  # pragma: no cover - a delta that breaks the digit always exists
+            raise ValueError("Could not break the MPAN check digit")
+    elif fault == "swapped_readings":
+        if t.previous_reading is None or t.current_reading is None:
+            raise ValueError("swapped_readings needs cumulative readings")
+        t.previous_reading, t.current_reading = t.current_reading, t.previous_reading
+    elif fault == "wrong_period_days":
+        counted = (t.billing_period_end - t.billing_period_start).days + 1
+        printed = counted + 5
+        # Recompute the standing charge on the printed days so the cost check
+        # still reconciles and only the billing-period check fails.
+        standing_rate = Decimal(f"{t.standing_charge:.2f}")
+        energy_total = sum((c.amount for c in bill.charges[:-1]), Decimal("0"))
+        new_standing = _money(standing_rate * printed / 100)
+        bill.charges[-1] = Charge(
+            "Standing charge",
+            f"{printed} days at {_fmt_rate(f'{standing_rate:.2f}', t.standing_charge_unit)}",
+            new_standing,
+        )
+        new_subtotal = energy_total + new_standing
+        new_vat = _money(new_subtotal * VAT_RATE)
+        new_total = new_subtotal + new_vat
+        t.period_days = printed
+        t.subtotal_excl_tax = float(new_subtotal)
+        t.tax_amount = float(new_vat)
+        t.total_amount = float(new_total)
+        bill.amount_due = bill.previous_balance - bill.payments + new_total
+    elif fault == "wrong_consumption":
+        t.consumption_kwh = float(t.consumption_kwh + 50)
+    elif fault == "missing_unit_rates":
+        # The bill prints no unit rate at all (like the Oklahoma sample): the
+        # energy lines go, the standing line stays, and the totals still include
+        # the energy cost. Onboarding must fail; the total still reconciles.
+        t.unit_rates = []
+        bill.charges = [bill.charges[-1]]
+
+
+def make_bill(index: int, rng: random.Random, fault: str | None = None) -> SyntheticBill:
     template = TEMPLATES[index % len(TEMPLATES)]
     supplier = rng.choice(SUPPLIERS)
     brand = supplier["name"].split()[0]
@@ -172,7 +273,7 @@ def make_bill(index: int, rng: random.Random) -> SyntheticBill:
         total_amount=float(total),
     )
 
-    return SyntheticBill(
+    bill = SyntheticBill(
         bill_id=f"bill_{index:03d}",
         template=template,
         supplier=supplier,
@@ -192,6 +293,9 @@ def make_bill(index: int, rng: random.Random) -> SyntheticBill:
         amount_due=amount_due,
         rate_decimals=decimals,
     )
+    if fault is not None:
+        _apply_fault(bill, fault)
+    return bill
 
 
 # --- rendering ------------------------------------------------------------------------------
@@ -331,7 +435,9 @@ def _readings(p: _Page, bill: SyntheticBill, y: float) -> float:
 
 def _period(bill: SyntheticBill) -> str:
     t = bill.truth
-    days = (t.billing_period_end - t.billing_period_start).days + 1
+    # The printed day count wins: on clean bills it equals the date span, on a
+    # wrong_period_days bill it is the faulty printed figure the reader must copy.
+    days = t.period_days or (t.billing_period_end - t.billing_period_start).days + 1
     return f"{bill.d(t.billing_period_start)} to {bill.d(t.billing_period_end)} ({days} days)"
 
 
@@ -376,15 +482,19 @@ def _render_economy7(p: _Page, bill: SyntheticBill) -> None:
     p.text(WIDTH - MARGIN, y, "Cost", size=9, bold=True, colour=HexColor("#57606A"), align="right")
     p.rule(y + 6)
     y += 22
-    unit = t.unit_rates[0].rate_unit
-    for band, charge in zip(t.unit_rates, bill.charges, strict=False):
-        p.text(MARGIN, y, band.label, size=10, bold=True)
-        p.text(MARGIN + 120, y, f"{int(band.kwh)} kWh", size=10)
-        p.text(MARGIN + 230, y, _fmt_rate(f"{band.rate:.{bill.rate_decimals}f}", unit), size=10)
-        p.text(WIDTH - MARGIN, y, _gbp(charge.amount), size=10, align="right")
+    if t.unit_rates:
+        unit = t.unit_rates[0].rate_unit
+        for band, charge in zip(t.unit_rates, bill.charges, strict=False):
+            p.text(MARGIN, y, band.label, size=10, bold=True)
+            p.text(MARGIN + 120, y, f"{int(band.kwh)} kWh", size=10)
+            p.text(MARGIN + 230, y, _fmt_rate(f"{band.rate:.{bill.rate_decimals}f}", unit), size=10)
+            p.text(WIDTH - MARGIN, y, _gbp(charge.amount), size=10, align="right")
+            y += 18
+    else:
+        p.text(MARGIN, y, "Unit rate not printed on this bill", size=10)
         y += 18
     standing = bill.charges[-1]
-    days = (t.billing_period_end - t.billing_period_start).days + 1
+    days = t.period_days or (t.billing_period_end - t.billing_period_start).days + 1
     p.text(MARGIN, y, "Standing charge", size=10, bold=True)
     p.text(MARGIN + 120, y, f"{days} days", size=10)
     p.text(MARGIN + 230, y, _fmt_rate(f"{t.standing_charge:.2f}", t.standing_charge_unit), size=10)
@@ -488,12 +598,34 @@ def photo_variant(img: Image.Image, rng: random.Random) -> Image.Image:
     return photo
 
 
-def generate(out_dir: Path, n: int = 24, seed: int = 7) -> list[dict]:
+def generate(out_dir: Path, n: int = 24, seed: int = 7, faulty_n: int = 0) -> list[dict]:
+    """Generate `n` bills, `faulty_n` of them carrying a planted fault.
+
+    Faulty bills are spread evenly through the set, so an evaluation `--limit`
+    still sees a mix of clean and faulty bills. Fault types cycle in
+    FAULT_TYPES order, skipping faults that do not apply to a bill's template
+    (swapped_readings on Economy 7).
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
+    faulty_n = max(0, min(faulty_n, n))
     records = []
+    next_fault = 0
     for index in range(n):
         rng = random.Random(seed * 10_000 + index)
-        bill = make_bill(index, rng)
+        fault: str | None = None
+        is_faulty_slot = (index + 1) * faulty_n // n > index * faulty_n // n if n else False
+        if is_faulty_slot:
+            template = TEMPLATES[index % len(TEMPLATES)]
+            allowed = set(applicable_faults(template))
+            # Cycle through FAULT_TYPES in global order, skipping faults that
+            # do not apply to this template, so every fault type gets used.
+            for offset in range(len(FAULT_TYPES)):
+                candidate = FAULT_TYPES[(next_fault + offset) % len(FAULT_TYPES)]
+                if candidate in allowed:
+                    fault = candidate
+                    next_fault = (FAULT_TYPES.index(candidate) + 1) % len(FAULT_TYPES)
+                    break
+        bill = make_bill(index, rng, fault=fault)
         pdf_bytes = render_pdf(bill)
         scan = rasterise(pdf_bytes)
 
@@ -512,6 +644,8 @@ def generate(out_dir: Path, n: int = 24, seed: int = 7) -> list[dict]:
                 "template": bill.template,
                 "files": files,
                 "truth": bill.truth.model_dump(mode="json"),
+                "fault": bill.fault,
+                "expected_check": FAULT_TO_CHECK.get(bill.fault) if bill.fault else None,
             }
         )
     with (out_dir / "manifest.jsonl").open("w") as fh:
@@ -526,10 +660,20 @@ def main() -> None:
     )
     parser.add_argument("--n", type=int, default=24, help="number of bills")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--faulty",
+        type=int,
+        default=0,
+        help="number of bills with a planted fault, for measuring review-flag catch rate",
+    )
     parser.add_argument("--out", type=Path, default=Path("data/synthetic"))
     args = parser.parse_args()
-    records = generate(args.out, args.n, args.seed)
-    print(f"Wrote {len(records)} bills ({len(records) * 3} files) to {args.out}")
+    records = generate(args.out, args.n, args.seed, faulty_n=args.faulty)
+    faulty = sum(1 for r in records if r["fault"])
+    print(
+        f"Wrote {len(records)} bills ({len(records) * 3} files) to {args.out} "
+        f"({faulty} with a planted fault)"
+    )
 
 
 if __name__ == "__main__":

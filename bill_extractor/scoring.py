@@ -132,6 +132,11 @@ class DocResult:
     input_tokens: int | None = None
     output_tokens: int | None = None
     error: str | None = None
+    # Planted-fault bills only: what was planted, which check should catch it,
+    # and whether that check actually failed.
+    fault: str | None = None
+    expected_check: str | None = None
+    expected_check_failed: bool | None = None
 
     @property
     def all_correct(self) -> bool:
@@ -163,8 +168,36 @@ def summarise(results: list[DocResult]) -> dict:
     }
     total_fields = sum(outcome_counts.values())
 
-    with_errors = [r for r in scored if not r.all_correct]
-    clean = [r for r in scored if r.all_correct]
+    # Model errors are measured on clean bills only. A faulty bill is *supposed*
+    # to be flagged, so a faithful extraction of one (all fields correct, flag
+    # on) is a catch, not a false alarm -- it gets its own section below.
+    all_correct = [r for r in scored if r.all_correct]
+    with_errors = [r for r in scored if not r.all_correct and not r.fault]
+    clean = [r for r in scored if r.all_correct and not r.fault]
+    faulty_docs = [r for r in scored if r.fault]
+    by_fault: dict[str, dict] = {}
+    for fault in sorted({r.fault for r in faulty_docs}):
+        group = [r for r in faulty_docs if r.fault == fault]
+        known = [r for r in group if r.expected_check_failed is not None]
+        by_fault[fault] = {
+            "docs": len(group),
+            "caught": sum(bool(r.needs_review) for r in group),
+            "catch_rate": _pct(sum(bool(r.needs_review) for r in group), len(group)),
+            "expected_check": group[0].expected_check,
+            "expected_check_caught": _pct(
+                sum(bool(r.expected_check_failed) for r in known), len(known)
+            ),
+        }
+    known_faulty = [r for r in faulty_docs if r.expected_check_failed is not None]
+    planted = {
+        "docs": len(faulty_docs),
+        "caught": sum(bool(r.needs_review) for r in faulty_docs),
+        "catch_rate": _pct(sum(bool(r.needs_review) for r in faulty_docs), len(faulty_docs)),
+        "expected_check_caught": _pct(
+            sum(bool(r.expected_check_failed) for r in known_faulty), len(known_faulty)
+        ),
+        "by_fault": by_fault,
+    }
 
     by_variant = {}
     for variant in sorted({r.variant for r in results}):
@@ -185,18 +218,19 @@ def summarise(results: list[DocResult]) -> dict:
         "errors": len(results) - len(scored),
         "error_messages": [[message, count] for message, count in error_counts.most_common(5)],
         "field_accuracy_overall": _pct(outcome_counts["correct"], total_fields),
-        "doc_exact_match": _pct(len(clean), len(scored)),
+        "doc_exact_match": _pct(len(all_correct), len(scored)),
         "outcomes": outcome_counts,
         "field_accuracy": field_accuracy,
         "by_variant": by_variant,
         "review_flag": {
-            # Of documents the model got wrong, how many did the checks flag for review?
+            # Of clean documents the model got wrong, how many did the checks flag?
             "docs_with_any_error": len(with_errors),
             "caught": sum(bool(r.needs_review) for r in with_errors),
             "catch_rate": _pct(sum(bool(r.needs_review) for r in with_errors), len(with_errors)),
-            # Of documents the model got fully right, how many were flagged anyway?
+            # Of clean documents the model got fully right, how many were flagged anyway?
             "false_alarm_rate": _pct(sum(bool(r.needs_review) for r in clean), len(clean)),
         },
+        "planted_faults": planted,
         "latency_ms": {"p50": _percentile(latencies, 50), "p95": _percentile(latencies, 95)},
         "mean_attempts": round(statistics.fmean(attempts), 2) if attempts else None,
         "tokens": {
@@ -220,6 +254,20 @@ def render_markdown(summary: dict, title: str) -> str:
         return "n/a" if value is None else f"{value}%"
 
     review = summary["review_flag"]
+    planted = summary.get("planted_faults") or {}
+    planted_lines: list[str] = []
+    if planted.get("docs"):
+        planted_lines = [
+            f"- Planted faults: checks flagged {planted['caught']} of {planted['docs']} "
+            f"faulty documents ({fmt(planted['catch_rate'])}); "
+            f"expected check failed on {fmt(planted['expected_check_caught'])}",
+        ]
+        for fault, row in planted["by_fault"].items():
+            planted_lines.append(
+                f"  - {fault} ({row['expected_check']}): {row['caught']}/{row['docs']} "
+                f"flagged ({fmt(row['catch_rate'])}), "
+                f"expected check {fmt(row['expected_check_caught'])}"
+            )
     lines = [
         f"# {title}",
         "",
@@ -230,6 +278,7 @@ def render_markdown(summary: dict, title: str) -> str:
         f"- Review flag caught {review['caught']} of {review['docs_with_any_error']} documents "
         f"with an error ({fmt(review['catch_rate'])}); false alarms on correct documents: "
         f"{fmt(review['false_alarm_rate'])}",
+        *planted_lines,
         *_error_lines(summary),
         f"- Latency p50 / p95: {summary['latency_ms']['p50']} / {summary['latency_ms']['p95']} ms; "
         f"mean attempts {summary['mean_attempts']}",

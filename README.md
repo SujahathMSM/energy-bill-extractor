@@ -167,6 +167,35 @@ The report (Markdown and JSON in `reports/`) gives:
   (catch rate), and how many fully correct documents were flagged anyway (false-alarm rate).
 - Latency (p50 and p95), mean attempts and token use.
 
+### Planted-error bills: measuring the review flag
+
+Clean bills cannot measure the review flag: if the model reads everything correctly,
+there is nothing to catch. `synth --faulty N` prints one deliberate inconsistency on
+N of the bills, spread evenly through the set:
+
+| Planted fault | Check that must fail |
+|---|---|
+| `wrong_total` | `total_reconciles` — total £5.00 above subtotal + tax |
+| `bad_mpan` | `meter_point_checksum` — one MPAN digit changed |
+| `swapped_readings` | `readings_match_consumption` — previous/current swapped |
+| `wrong_period_days` | `billing_period` — printed days 5 more than the date span |
+| `wrong_consumption` | `bands_match_consumption` — consumption 50 kWh above the bands |
+| `missing_unit_rates` | `onboarding_fields` — no unit rate printed at all |
+
+The ground truth records what is printed, fault included, so a faithful extraction
+still scores 100% on fields — the bill itself is what must be flagged. The report
+then gives a separate planted-fault section: catch rate overall and per fault type,
+whether the expected check failed, and a false-alarm rate counted on clean bills only.
+
+```bash
+python -m bill_extractor.synth --n 24 --faulty 12 --out data/synthetic
+python -m bill_extractor.evaluate --backend anthropic --data data/synthetic
+```
+
+An oracle backend that returns ground truth scores 100% on fields and flags every
+faulty bill (covered by tests). The next real-model run should use faulty bills too,
+so the reported catch rate is the model's, not the oracle's.
+
 ### Results
 
 claude-sonnet-5-5 in prompt mode, run on 17 October 2026: 10 bills in 3 formats, so 30
@@ -185,17 +214,20 @@ documents and 510 fields.
 
 **What this does and does not show.** The synthetic bills are clean and consistently laid out,
 so a perfect score shows the pipeline works end to end, not that it will be perfect on real
-bills. With no errors in the run, it also could not measure how often the review flag catches
-real mistakes. The unit tests cover the flag by feeding in known errors: pence read as pounds,
-a misread MPAN digit, and totals that do not add up. The next step is a harder set: real bills
-used with consent, more layouts, and worse photos.
+bills. That run used clean bills only, so it could not measure how often the review flag
+catches mistakes. The planted-error bills above close that gap: the harness now measures
+catch rate per fault type, and the oracle test proves it flags every faulty bill when the
+extraction is faithful. The next step is a harder set: real bills used with consent, more
+layouts, and worse photos.
 
 ## Tests
 
-`make test` runs 94 tests without network access or API keys. They cover:
+`make test` runs 127 tests without network access or API keys. They cover:
 
 - Preprocessing.
 - Every check, including that the generator's ground truth passes all of them.
+- Planted-error bills: each fault fails only its expected check, and an oracle backend
+  flags every faulty bill while scoring 100% on fields.
 - The retry loop.
 - The evaluation harness: a backend that returns the ground truth must score 100%.
 - The exact request bodies sent to Claude and to OpenAI-compatible servers, and each fallback

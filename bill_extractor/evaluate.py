@@ -43,7 +43,13 @@ async def evaluate(
     seen_errors: set[str] = set()
 
     async def run_one(record: dict, variant: str) -> DocResult:
-        result = DocResult(record["id"], variant, record["template"])
+        result = DocResult(
+            record["id"],
+            variant,
+            record["template"],
+            fault=record.get("fault"),
+            expected_check=record.get("expected_check"),
+        )
         truth = BillExtraction.model_validate(record["truth"])
         data = (data_dir / record["files"][variant]).read_bytes()
         async with semaphore:
@@ -58,6 +64,10 @@ async def evaluate(
         result.outcomes = score_fields(truth, extracted.extraction)
         result.needs_review = extracted.needs_review
         result.failed_checks = [c.name for c in extracted.checks if c.status == "fail"]
+        if result.expected_check is not None:
+            result.expected_check_failed = any(
+                c.name == result.expected_check and c.status == "fail" for c in extracted.checks
+            )
         result.latency_ms = extracted.meta.latency_ms
         result.attempts = extracted.meta.attempts
         result.input_tokens = extracted.meta.input_tokens
