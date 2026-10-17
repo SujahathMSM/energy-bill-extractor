@@ -15,6 +15,7 @@ off, on faulty bills it must turn on.
 
     python -m bill_extractor.synth --n 24 --out data/synthetic
     python -m bill_extractor.synth --n 24 --faulty 12 --out data/synthetic
+    python -m bill_extractor.synth --n 24 --degraded --out data/synthetic
 """
 
 import argparse
@@ -27,7 +28,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pypdfium2 as pdfium
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 from reportlab.lib.colors import Color, HexColor, white
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -577,34 +578,100 @@ def rasterise(pdf_bytes: bytes, dpi: int = 150) -> Image.Image:
             pdf.close()
 
 
-def photo_variant(img: Image.Image, rng: random.Random) -> Image.Image:
-    """Make a scan look like a quick phone photo on a table."""
+DEGRADATION_LEVELS = ("clean", "mild", "moderate", "severe")
+
+# Per-level photo damage: (rotate_deg, blur, brightness, contrast, glare_alpha, crop, jpeg_quality).
+# "mild" keeps the original photo_variant ranges, so existing samples are unchanged.
+_DEGRADATION_PARAMS = {
+    "clean": ((1.0,), (0.0, 0.3), (0.9, 1.0), (0.95, 1.05), 0.0, 0.0, (85, 95)),
+    "mild": ((3.0,), (0.4, 0.9), (0.6, 0.8), (0.85, 1.0), 0.0, 0.0, (55, 75)),
+    "moderate": ((6.0,), (1.2, 1.8), (0.5, 0.7), (0.70, 0.85), 0.35, 0.05, (40, 55)),
+    "severe": ((10.0,), (2.0, 3.0), (0.4, 0.6), (0.60, 0.75), 0.55, 0.10, (25, 40)),
+}
+
+
+def _glare(photo: Image.Image, rng: random.Random, alpha: float) -> Image.Image:
+    """A bright spot as if a light reflected off the paper."""
+    overlay = Image.new("RGBA", photo.size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(overlay)
+    w, h = photo.size
+    cx, cy = rng.uniform(0.2, 0.8) * w, rng.uniform(0.2, 0.8) * h
+    radius = rng.uniform(0.15, 0.30) * min(w, h)
+    box = [cx - radius, cy - radius, cx + radius, cy + radius]
+    draw.ellipse(box, fill=(255, 255, 255, int(255 * alpha)))
+    overlay = overlay.filter(ImageFilter.GaussianBlur(radius / 3))
+    return Image.alpha_composite(photo.convert("RGBA"), overlay).convert("RGB")
+
+
+def _crop_edge(photo: Image.Image, rng: random.Random, fraction: float) -> Image.Image:
+    """Cut `fraction` off one random edge, as if the photo missed the page edge."""
+    w, h = photo.size
+    side = rng.choice(("left", "right", "top", "bottom"))
+    if side == "left":
+        return photo.crop((int(w * fraction), 0, w, h))
+    if side == "right":
+        return photo.crop((0, 0, int(w * (1 - fraction)), h))
+    if side == "top":
+        return photo.crop((0, int(h * fraction), w, h))
+    return photo.crop((0, 0, w, int(h * (1 - fraction))))
+
+
+def photo_variant(img: Image.Image, rng: random.Random, level: str = "mild") -> Image.Image:
+    """Make a scan look like a phone photo, with `level` of damage.
+
+    Levels run from "clean" (nearly straight, sharp) to "severe" (tilted,
+    blurred, dim, glare spot, one edge cropped). "mild" is the original photo.
+    """
+    if level not in _DEGRADATION_PARAMS:
+        raise ValueError(f"Unknown degradation level {level!r}; use one of {DEGRADATION_LEVELS}.")
+    (max_rotate,), blur, brightness, contrast, glare_alpha, crop, _ = _DEGRADATION_PARAMS[level]
     background = tuple(rng.randint(70, 120) for _ in range(3))
     pad = int(img.width * 0.06)
     framed = Image.new("RGB", (img.width + 2 * pad, img.height + 2 * pad), background)
     framed.paste(img, (pad, pad))
     photo = framed.rotate(
-        rng.uniform(-3.0, 3.0), resample=Image.Resampling.BICUBIC, expand=True, fillcolor=background
+        rng.uniform(-max_rotate, max_rotate),
+        resample=Image.Resampling.BICUBIC,
+        expand=True,
+        fillcolor=background,
     )
     # Uneven lighting: darken one side with a horizontal gradient.
     shade = Image.linear_gradient("L").rotate(90).resize(photo.size)
-    darker = ImageEnhance.Brightness(photo).enhance(rng.uniform(0.6, 0.8))
+    darker = ImageEnhance.Brightness(photo).enhance(rng.uniform(*brightness))
     if rng.random() < 0.5:
         shade = shade.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     photo = Image.composite(photo, darker, shade)
-    photo = ImageEnhance.Contrast(photo).enhance(rng.uniform(0.85, 1.0))
-    photo = photo.filter(ImageFilter.GaussianBlur(rng.uniform(0.4, 0.9)))
+    photo = ImageEnhance.Contrast(photo).enhance(rng.uniform(*contrast))
+    photo = photo.filter(ImageFilter.GaussianBlur(rng.uniform(*blur)))
+    if glare_alpha:
+        photo = _glare(photo, rng, glare_alpha)
+    if crop:
+        photo = _crop_edge(photo, rng, crop)
     photo.thumbnail((1400, 1400))
     return photo
 
 
-def generate(out_dir: Path, n: int = 24, seed: int = 7, faulty_n: int = 0) -> list[dict]:
+def degraded_quality(rng: random.Random, level: str) -> int:
+    """JPEG quality for a degradation level (lower = more compression artefacts)."""
+    if level not in _DEGRADATION_PARAMS:
+        raise ValueError(f"Unknown degradation level {level!r}; use one of {DEGRADATION_LEVELS}.")
+    low, high = _DEGRADATION_PARAMS[level][6]
+    return rng.randint(low, high)
+
+
+def generate(
+    out_dir: Path, n: int = 24, seed: int = 7, faulty_n: int = 0, degraded: bool = False
+) -> list[dict]:
     """Generate `n` bills, `faulty_n` of them carrying a planted fault.
 
     Faulty bills are spread evenly through the set, so an evaluation `--limit`
     still sees a mix of clean and faulty bills. Fault types cycle in
     FAULT_TYPES order, skipping faults that do not apply to a bill's template
     (swapped_readings on Economy 7).
+
+    When `degraded` is set, each bill also gets one photo per degradation
+    level (clean / mild / moderate / severe) as `photo_clean` etc., so an
+    evaluation over those variants shows accuracy against photo damage.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     faulty_n = max(0, min(faulty_n, n))
@@ -636,7 +703,15 @@ def generate(out_dir: Path, n: int = 24, seed: int = 7, faulty_n: int = 0) -> li
         }
         (out_dir / files["pdf"]).write_bytes(pdf_bytes)
         scan.save(out_dir / files["png"], optimize=True)
-        photo_variant(scan, rng).save(out_dir / files["photo"], quality=rng.randint(55, 75))
+        photo = photo_variant(scan, rng)
+        photo.save(out_dir / files["photo"], quality=degraded_quality(rng, "mild"))
+        if degraded:
+            for level in DEGRADATION_LEVELS:
+                key = f"photo_{level}"
+                files[key] = f"{bill.bill_id}_photo_{level}.jpg"
+                photo_variant(scan, rng, level=level).save(
+                    out_dir / files[key], quality=degraded_quality(rng, level)
+                )
 
         records.append(
             {
@@ -666,13 +741,19 @@ def main() -> None:
         default=0,
         help="number of bills with a planted fault, for measuring review-flag catch rate",
     )
+    parser.add_argument(
+        "--degraded",
+        action="store_true",
+        help="also write one photo per degradation level (clean/mild/moderate/severe)",
+    )
     parser.add_argument("--out", type=Path, default=Path("data/synthetic"))
     args = parser.parse_args()
-    records = generate(args.out, args.n, args.seed, faulty_n=args.faulty)
+    records = generate(args.out, args.n, args.seed, faulty_n=args.faulty, degraded=args.degraded)
     faulty = sum(1 for r in records if r["fault"])
+    per_bill = 3 + (len(DEGRADATION_LEVELS) if args.degraded else 0)
     print(
-        f"Wrote {len(records)} bills ({len(records) * 3} files) to {args.out} "
-        f"({faulty} with a planted fault)"
+        f"Wrote {len(records)} bills ({len(records) * per_bill} files) to {args.out} "
+        f"({faulty} with a planted fault)" + (" with degraded photos" if args.degraded else "")
     )
 
 

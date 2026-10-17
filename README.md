@@ -262,6 +262,28 @@ An oracle backend that returns ground truth scores 100% on fields and flags ever
 faulty bill (covered by tests). The next real-model run should use faulty bills too,
 so the reported catch rate is the model's, not the oracle's.
 
+### Degraded-photo curve: accuracy against photo damage
+
+Real bills arrive as quick phone photos, not clean scans. `synth --degraded`
+writes one extra photo per bill at each damage level, so an evaluation over
+those variants shows where accuracy starts to fall:
+
+| Level | Damage |
+|---|---|
+| `clean` | Nearly straight, sharp, JPEG quality 85–95 |
+| `mild` | The original phone photo: tilt ±3°, light blur, JPEG 55–75 |
+| `moderate` | Tilt ±6°, stronger blur, dimmer, a glare spot, 5% cropped off one edge, JPEG 40–55 |
+| `severe` | Tilt ±10°, heavy blur, dim, larger glare, 10% cropped, JPEG 25–40 |
+
+```bash
+python -m bill_extractor.synth --n 24 --degraded --out data/synthetic
+python -m bill_extractor.evaluate --backend anthropic --variants photo_clean,photo_mild,photo_moderate,photo_severe
+```
+
+The report's per-input table then gives field accuracy and exact-match rate
+for each level — the curve. No scoring changes were needed: the degraded
+photos are just extra variants.
+
 ### Results
 
 claude-sonnet-5-5 in prompt mode, run on 17 October 2026: 10 bills in 3 formats, so 30
@@ -288,12 +310,14 @@ layouts, and worse photos.
 
 ## Tests
 
-`make test` runs 139 tests without network access or API keys. They cover:
+`make test` runs 146 tests without network access or API keys. They cover:
 
 - Preprocessing.
 - Every check, including that the generator's ground truth passes all of them.
 - Planted-error bills: each fault fails only its expected check, and an oracle backend
   flags every faulty bill while scoring 100% on fields.
+- Degraded photos: levels are ordered by measured sharpness, unknown levels are
+  rejected, and `generate(degraded=True)` writes one photo per level.
 - Switching savings: mock-bill arithmetic, Economy 7 band split and label matching,
   currency mismatch, unpriceable bills, and the `/v1/savings` endpoint.
 - The retry loop.
