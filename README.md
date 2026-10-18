@@ -366,6 +366,33 @@ Haiku 5.5, run on 17 October 2026: 24 bills × 3 formats (PDF, scan, photo), so
   tokens per bill. Cost for the whole run: ~$0.06 on Haiku (vs ~$1.11 on
   Sonnet at the same token counts).
 
+### Model comparison: Sonnet vs Haiku vs local Qwen
+
+These three runs are **not** the same bills and variants, so the table is a
+comparison of runs, not a head-to-head on identical inputs. The fair Haiku
+degraded-photo run (same 96 docs as Sonnet's curve) is still outstanding.
+
+| Model | Run | Field accuracy | All fields correct | Latency p50 | Cost per bill |
+|---|---|---|---|---|---|
+| Sonnet 5.5 | 24 bills × 4 photo levels, 96 docs | 97.5% | 78.1% | 2.6 s | ~$0.013 |
+| Haiku 5.5 | 24 bills × 3 formats, 12 faulty, 72 docs | 99.6% | 91.7% | 3.4 s | ~$0.0008 |
+| Qwen2.5VL 3B (local, 1024 px) | 10 bills, photo_clean only | 88.4% | 0.0% | 26.4 s | $0 |
+
+- **Qwen (Ollama, RTX 3050 laptop).** 168 correct, 10 wrong, 12 hallucinated.
+  Every document had an error and the review flag caught all 10 (100.0%).
+  Weakest: `other_charges` 0.0% (invented charges on bills that have none),
+  `reading_type` 40.0%, `current_reading` 80.0%. At the default 1568 px
+  image size, 19 of 20 documents failed with empty replies; 1024 px fixed
+  that, but latency stayed at 26.4 s median (43.4 s p95) — about 8× Haiku.
+  Local cost is $0, but the model is too slow and too hallucination-prone for
+  bill extraction on this hardware.
+- **Haiku vs Sonnet.** Haiku's 99.6% on standard formats vs Sonnet's 97.5%
+  on degraded photos (including severe) does **not** mean Haiku is more
+  accurate — the runs differ. What the runs do show is that Haiku matches
+  Sonnet's quality on the formats that matter at ~1/16 the cost ($0.0008 vs
+  $0.013 per bill) and catches 100% of planted faults. That is why Haiku is
+  the pick for this project.
+
 ## Tests
 
 `make test` runs 146 tests without network access or API keys. They cover:
