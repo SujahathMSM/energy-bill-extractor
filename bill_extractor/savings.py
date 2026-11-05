@@ -9,9 +9,9 @@ seasons -- the same estimate the extraction already reports.
 
 A target tariff can be a single unlabelled rate (all usage charged at that
 rate, the common case for a switching quote) or one rate per band, matched
-to the bill's bands by label. A bill with no unit rates printed (like the
-Oklahoma sample) cannot be priced, so it raises ValueError instead of
-inventing a current cost.
+to the bill's bands by label. A bill with no unit rates printed (some US
+co-operative bills print only a total) cannot be priced, so it raises
+ValueError instead of inventing a current cost.
 """
 
 from pydantic import BaseModel, ConfigDict, Field

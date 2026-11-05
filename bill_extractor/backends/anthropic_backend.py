@@ -25,7 +25,14 @@ from anthropic import AsyncAnthropic
 from ..preprocess import PageImage
 from ..prompts import SYSTEM_PROMPT, TOOL_NAME, build_user_prompt
 from ..schema import BillExtraction, extraction_json_schema
-from .base import BackendError, BackendResponse, VLMBackend, parse_json_object
+from .base import (
+    BackendError,
+    BackendRateLimitError,
+    BackendResponse,
+    BackendTimeoutError,
+    VLMBackend,
+    parse_json_object,
+)
 
 log = logging.getLogger(__name__)
 
@@ -97,11 +104,15 @@ class AnthropicBackend(VLMBackend):
         max_tokens: int = 4096,
         mode: Mode = "prompt",
         client: AsyncAnthropic | None = None,
+        max_retries: int = 2,
     ) -> None:
         self.model = model
         self.max_tokens = max_tokens
         self.mode: Mode = mode
-        self.client = client or AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=2)
+        # The SDK retries connection errors, 408, 409, 429 and 5xx with exponential backoff.
+        self.client = client or AsyncAnthropic(
+            api_key=api_key, timeout=timeout, max_retries=max_retries
+        )
         self.output_schema = structured_output_schema()
         self.tool = {
             "name": TOOL_NAME,
@@ -162,6 +173,10 @@ class AnthropicBackend(VLMBackend):
                     raise BackendError(f"Claude request failed: {exc}") from exc
                 log.warning("Claude rejected %s output (%s); trying the next mode", mode, exc)
                 continue
+            except anthropic.APITimeoutError as exc:
+                raise BackendTimeoutError("Claude did not answer in time.") from exc
+            except (anthropic.RateLimitError, anthropic.OverloadedError) as exc:
+                raise BackendRateLimitError(f"Claude is busy: {exc}") from exc
             except anthropic.APIError as exc:
                 raise BackendError(f"Claude request failed: {exc}") from exc
 

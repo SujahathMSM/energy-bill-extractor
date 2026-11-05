@@ -1,11 +1,22 @@
 """Model backends and the factory that picks one from settings."""
 
 from ..config import Settings
-from .base import BackendError, BackendResponse, VLMBackend, parse_json_object
+from .base import (
+    BackendError,
+    BackendRateLimitError,
+    BackendResponse,
+    BackendTimeoutError,
+    MalformedReplyError,
+    VLMBackend,
+    parse_json_object,
+)
 
 __all__ = [
     "BackendError",
+    "BackendRateLimitError",
     "BackendResponse",
+    "BackendTimeoutError",
+    "MalformedReplyError",
     "VLMBackend",
     "build_backend",
     "parse_json_object",
@@ -16,7 +27,7 @@ def build_backend(settings: Settings) -> VLMBackend:
     if settings.backend == "mock":
         from .mock_backend import MockBackend
 
-        return MockBackend()
+        return MockBackend(max_pages=settings.max_pages, max_side=settings.max_image_side)
 
     if settings.backend == "anthropic":
         from .anthropic_backend import AnthropicBackend
@@ -29,6 +40,7 @@ def build_backend(settings: Settings) -> VLMBackend:
             timeout=settings.timeout_s,
             max_tokens=settings.max_output_tokens,
             mode=settings.anthropic_output_mode,
+            max_retries=settings.provider_retries,
         )
 
     from .openai_backend import OpenAICompatibleBackend
@@ -40,6 +52,7 @@ def build_backend(settings: Settings) -> VLMBackend:
             base_url=settings.ollama_base_url,
             response_format=settings.openai_response_format,
             timeout=settings.timeout_s,
+            max_retries=settings.provider_retries,
             # Deterministic decoding; local servers accept these parameters.
             extra_params={"temperature": 0, "max_tokens": settings.max_output_tokens},
         )
@@ -57,4 +70,5 @@ def build_backend(settings: Settings) -> VLMBackend:
         api_key=settings.openai_api_key,
         response_format=settings.openai_response_format,
         timeout=settings.timeout_s,
+        max_retries=settings.provider_retries,
     )

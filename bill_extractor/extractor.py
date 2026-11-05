@@ -7,9 +7,9 @@ import uuid
 
 from pydantic import ValidationError
 
-from .backends import VLMBackend
-from .preprocess import prepare
-from .schema import BillExtraction, ExtractionMeta, ExtractionResult
+from .backends import MalformedReplyError, VLMBackend
+from .preprocess import MIN_LONG_SIDE, PreparedDocument, prepare
+from .schema import BillExtraction, Check, ExtractionMeta, ExtractionResult
 from .validation import analyse
 
 
@@ -72,6 +72,38 @@ def summarise_errors(exc: ValidationError, limit: int = 8) -> str:
     return "\n".join(lines)
 
 
+def input_quality_check(document: PreparedDocument, blur_threshold: float) -> Check:
+    """Flag inputs too small or too blurry to trust, so a person checks the result.
+
+    Model confidence is not calibrated, but input quality is measurable: on the synthetic set,
+    accuracy holds up to "moderate" photo damage and drops sharply at "severe" (see EVALS.md).
+    """
+    if document.source_size is None:
+        return Check(
+            name="input_quality", status="skipped", detail="Digital PDF: rendered to size."
+        )
+    problems = []
+    width, height = document.source_size
+    if max(width, height) < MIN_LONG_SIDE:
+        problems.append(f"low resolution ({width}x{height} px)")
+    if (
+        blur_threshold > 0
+        and document.sharpness is not None
+        and document.sharpness < blur_threshold
+    ):
+        problems.append(f"blurry (sharpness {document.sharpness:g}, threshold {blur_threshold:g})")
+    if problems:
+        return Check(
+            name="input_quality",
+            status="fail",
+            detail="Photo is " + " and ".join(problems) + "; values may be misread.",
+        )
+    detail = f"{width}x{height} px"
+    if document.sharpness is not None:
+        detail += f", sharpness {document.sharpness:g}"
+    return Check(name="input_quality", status="pass", detail=detail + ".")
+
+
 class BillExtractor:
     def __init__(
         self,
@@ -79,23 +111,34 @@ class BillExtractor:
         max_attempts: int = 2,
         max_pages: int = 3,
         max_side: int = 1568,
+        max_megapixels: float = 40.0,
+        blur_threshold: float = 2.0,
     ) -> None:
         self.backend = backend
         self.max_attempts = max_attempts
         self.max_pages = max_pages
         self.max_side = max_side
+        self.max_megapixels = max_megapixels
+        self.blur_threshold = blur_threshold
 
     async def extract(self, data: bytes, request_id: str | None = None) -> ExtractionResult:
         started = time.perf_counter()
         # Rendering is CPU work; keep it off the event loop.
-        document = await asyncio.to_thread(prepare, data, self.max_pages, self.max_side)
+        document = await asyncio.to_thread(
+            prepare, data, self.max_pages, self.max_side, self.max_megapixels
+        )
 
         feedback: str | None = None
         input_tokens = output_tokens = 0
         extraction: BillExtraction | None = None
         attempt = 0
         for attempt in range(1, self.max_attempts + 1):  # noqa: B007 - attempt used after loop
-            response = await self.backend.extract(document.pages, feedback)
+            try:
+                response = await self.backend.extract(document.pages, feedback)
+            except MalformedReplyError as exc:
+                # Repair attempt: say what was wrong with the reply and ask again.
+                feedback = f"- (reply): {exc} Reply with a single JSON object and nothing else."
+                continue
             input_tokens += response.input_tokens or 0
             output_tokens += response.output_tokens or 0
             try:
@@ -110,13 +153,17 @@ class BillExtractor:
             )
 
         derived, checks = analyse(extraction)
+        checks.append(input_quality_check(document, self.blur_threshold))
         failed = [c for c in checks if c.status == "fail"]
+        flagged = list(dict.fromkeys(f for c in failed for f in c.fields))
         return ExtractionResult(
             extraction=extraction,
             derived=derived,
             checks=checks,
             needs_review=bool(failed),
             review_reasons=[f"{c.name}: {c.detail}" for c in failed],
+            flagged_fields=flagged,
+            warnings=document.warnings,
             meta=ExtractionMeta(
                 request_id=request_id or uuid.uuid4().hex[:12],
                 backend=self.backend.name,

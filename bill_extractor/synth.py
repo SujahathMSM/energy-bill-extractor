@@ -181,7 +181,7 @@ def _apply_fault(bill: SyntheticBill, fault: str) -> None:
     elif fault == "wrong_consumption":
         t.consumption_kwh = float(t.consumption_kwh + 50)
     elif fault == "missing_unit_rates":
-        # The bill prints no unit rate at all (like the Oklahoma sample): the
+        # The bill prints no unit rate at all (some US co-operative bills print only a total): the
         # energy lines go, the standing line stays, and the totals still include
         # the energy cost. Onboarding must fail; the total still reconciles.
         t.unit_rates = []

@@ -12,6 +12,18 @@ class BackendError(RuntimeError):
     """The model provider failed or returned something unusable."""
 
 
+class BackendTimeoutError(BackendError):
+    """The provider did not answer within the timeout, after the SDK's own retries."""
+
+
+class BackendRateLimitError(BackendError):
+    """The provider kept rate-limiting or was overloaded, after the SDK's own retries."""
+
+
+class MalformedReplyError(BackendError):
+    """The model answered, but not with a JSON object. Worth one repair attempt."""
+
+
 @dataclass
 class BackendResponse:
     data: dict
@@ -40,11 +52,11 @@ def parse_json_object(text: str | None) -> dict:
     Local models in particular wrap JSON in code fences or add a sentence before it.
     """
     if not text:
-        raise BackendError("The model returned an empty reply.")
+        raise MalformedReplyError("The model returned an empty reply.")
     cleaned = _FENCE.sub("", text.strip())
     start = cleaned.find("{")
     if start == -1:
-        raise BackendError("The model reply did not contain a JSON object.")
+        raise MalformedReplyError("The model reply did not contain a JSON object.")
 
     depth = 0
     in_string = False
@@ -69,8 +81,10 @@ def parse_json_object(text: str | None) -> dict:
                 try:
                     value = json.loads(cleaned[start : index + 1])
                 except json.JSONDecodeError as exc:
-                    raise BackendError(f"The model reply was not valid JSON: {exc}") from exc
+                    raise MalformedReplyError(f"The model reply was not valid JSON: {exc}") from exc
                 if not isinstance(value, dict):
-                    raise BackendError("The model reply was not a JSON object.")
+                    raise MalformedReplyError("The model reply was not a JSON object.")
                 return value
-    raise BackendError("The model reply contained an unterminated JSON object.")
+    raise MalformedReplyError(
+        "The model reply contained an unterminated JSON object (was it cut off?)."
+    )

@@ -8,7 +8,14 @@ from openai import AsyncOpenAI
 from ..preprocess import PageImage
 from ..prompts import SYSTEM_PROMPT, build_user_prompt
 from ..schema import extraction_json_schema
-from .base import BackendError, BackendResponse, VLMBackend, parse_json_object
+from .base import (
+    BackendError,
+    BackendRateLimitError,
+    BackendResponse,
+    BackendTimeoutError,
+    VLMBackend,
+    parse_json_object,
+)
 
 log = logging.getLogger(__name__)
 
@@ -24,13 +31,18 @@ class OpenAICompatibleBackend(VLMBackend):
         timeout: float = 90.0,
         extra_params: dict | None = None,
         client: AsyncOpenAI | None = None,
+        max_retries: int = 2,
     ) -> None:
         self.name = name
         self.model = model
         self.response_format = response_format
-        # Local servers ignore the key, but the SDK insists on one.
+        # Local servers ignore the key, but the SDK insists on one. The SDK retries connection
+        # errors, 408, 409, 429 and 5xx with exponential backoff.
         self.client = client or AsyncOpenAI(
-            base_url=base_url, api_key=api_key or "not-needed", timeout=timeout, max_retries=2
+            base_url=base_url,
+            api_key=api_key or "not-needed",
+            timeout=timeout,
+            max_retries=max_retries,
         )
         self.extra_params = extra_params or {}
 
@@ -62,6 +74,13 @@ class OpenAICompatibleBackend(VLMBackend):
             params["response_format"] = response_format
         return await self.client.chat.completions.create(**params)
 
+    def _error(self, exc: Exception) -> BackendError:
+        if isinstance(exc, openai.APITimeoutError):
+            return BackendTimeoutError(f"{self.name} did not answer in time.")
+        if isinstance(exc, openai.RateLimitError):
+            return BackendRateLimitError(f"{self.name} is busy: {exc}")
+        return BackendError(f"{self.name} request failed: {exc}")
+
     async def extract(self, pages: list[PageImage], feedback: str | None = None) -> BackendResponse:
         try:
             completion = await self._create(pages, feedback)
@@ -69,15 +88,15 @@ class OpenAICompatibleBackend(VLMBackend):
             # Some servers do not support JSON-schema output. Fall back once to plain JSON mode;
             # the schema is in the prompt and the reply is validated either way.
             if self.response_format != "json_schema":
-                raise BackendError(f"{self.name} request failed: {exc}") from exc
+                raise self._error(exc) from exc
             log.warning("%s rejected json_schema output; falling back to json_object", self.name)
             self.response_format = "json_object"
             try:
                 completion = await self._create(pages, feedback)
             except openai.APIError as retry_exc:
-                raise BackendError(f"{self.name} request failed: {retry_exc}") from retry_exc
+                raise self._error(retry_exc) from retry_exc
         except openai.APIError as exc:
-            raise BackendError(f"{self.name} request failed: {exc}") from exc
+            raise self._error(exc) from exc
 
         if not completion.choices:
             raise BackendError(f"{self.name} returned no choices.")
