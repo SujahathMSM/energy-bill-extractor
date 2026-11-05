@@ -45,7 +45,7 @@ def _page_key(page: PageImage) -> str:
 
 class MockBackend(VLMBackend):
     name = "mock"
-    model = "mock-fixed-bill"
+    model = "mock-demo"
 
     def __init__(
         self, max_pages: int = 3, max_side: int = 1568, samples_dir: Path = SAMPLES_DIR

@@ -101,11 +101,18 @@ def test_demo_page_samples_extract(client):
 
     page = client.get("/").text
     sources = re.findall(r'data-src="([^"]+)"', page)
-    assert len(sources) == 3
+    assert len(sources) == 4
     for src in sources:
         data = client.get(src).content
         response = client.post("/v1/bills/extract", files={"file": (src.split("/")[-1], data)})
         assert response.status_code == 200, src
+        body = response.json()
+        # The planted-error sample must be flagged, and point at the readings; the rest pass.
+        if "fault" in src:
+            assert body["needs_review"], src
+            assert "previous_reading" in body["flagged_fields"]
+        else:
+            assert not body["needs_review"], src
 
 
 def test_launcher_uses_port_from_settings(monkeypatch):
