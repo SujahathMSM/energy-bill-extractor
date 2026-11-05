@@ -137,6 +137,11 @@ class DocResult:
     fault: str | None = None
     expected_check: str | None = None
     expected_check_failed: bool | None = None
+    # True: a schema-valid extraction came back (perhaps after a repair attempt).
+    # False: every attempt failed validation. None: the request failed for another reason.
+    schema_valid: bool | None = None
+    # Status of every check on this document, e.g. {"total_reconciles": "pass"}.
+    check_status: dict[str, str] = field(default_factory=dict)
 
     @property
     def all_correct(self) -> bool:
@@ -213,6 +218,20 @@ def summarise(results: list[DocResult]) -> dict:
 
     latencies = [r.latency_ms for r in scored if r.latency_ms is not None]
     attempts = [r.attempts for r in scored if r.attempts is not None]
+
+    validity_known = [r for r in results if r.schema_valid is not None]
+    check_names = sorted({name for r in scored for name in r.check_status})
+    checks = {}
+    for name in check_names:
+        statuses = [r.check_status.get(name) for r in scored if name in r.check_status]
+        passed, failed = statuses.count("pass"), statuses.count("fail")
+        checks[name] = {
+            "pass": passed,
+            "fail": failed,
+            "skipped": statuses.count("skipped"),
+            # Of the documents where the check could run, how many passed.
+            "pass_rate": _pct(passed, passed + failed),
+        }
     return {
         "docs": len(results),
         "errors": len(results) - len(scored),
@@ -229,8 +248,22 @@ def summarise(results: list[DocResult]) -> dict:
             "catch_rate": _pct(sum(bool(r.needs_review) for r in with_errors), len(with_errors)),
             # Of clean documents the model got fully right, how many were flagged anyway?
             "false_alarm_rate": _pct(sum(bool(r.needs_review) for r in clean), len(clean)),
+            # Which checks raised those false alarms (input_quality flags poor photos on purpose).
+            "false_alarm_checks": dict(
+                Counter(c for r in clean if r.needs_review for c in r.failed_checks).most_common()
+            ),
         },
         "planted_faults": planted,
+        "schema_valid_rate": _pct(
+            sum(bool(r.schema_valid) for r in validity_known), len(validity_known)
+        ),
+        "first_attempt_valid_rate": _pct(
+            sum(r.attempts == 1 for r in scored if r.schema_valid), len(validity_known)
+        ),
+        "checks": checks,
+        "docs_all_checks_pass": _pct(
+            sum(all(v != "fail" for v in r.check_status.values()) for r in scored), len(scored)
+        ),
         "latency_ms": {"p50": _percentile(latencies, 50), "p95": _percentile(latencies, 95)},
         "mean_attempts": round(statistics.fmean(attempts), 2) if attempts else None,
         "tokens": {
@@ -245,7 +278,8 @@ def _error_lines(summary: dict) -> list[str]:
         return []
     lines = ["- Extraction errors (most common first):"]
     for message, count in summary["error_messages"]:
-        lines.append(f"  - {count}x {message[:300]}")
+        flat = " ".join(message.split())
+        lines.append(f"  - {count}x {flat[:300]}")
     return lines
 
 
@@ -277,12 +311,16 @@ def render_markdown(summary: dict, title: str) -> str:
         f"- Outcomes: {summary['outcomes']}",
         f"- Review flag caught {review['caught']} of {review['docs_with_any_error']} documents "
         f"with an error ({fmt(review['catch_rate'])}); false alarms on correct documents: "
-        f"{fmt(review['false_alarm_rate'])}",
+        f"{fmt(review['false_alarm_rate'])}{_alarm_breakdown(review)}",
         *planted_lines,
         *_error_lines(summary),
+        f"- Schema-valid replies: {fmt(summary.get('schema_valid_rate'))} "
+        f"(first attempt: {fmt(summary.get('first_attempt_valid_rate'))})",
+        f"- Documents passing every consistency check: {fmt(summary.get('docs_all_checks_pass'))}",
         f"- Latency p50 / p95: {summary['latency_ms']['p50']} / {summary['latency_ms']['p95']} ms; "
         f"mean attempts {summary['mean_attempts']}",
         f"- Tokens: {summary['tokens']['input']} in / {summary['tokens']['output']} out",
+        *_cost_lines(summary),
         "",
         "| Input | Docs | Field accuracy | All fields correct |",
         "|---|---|---|---|",
@@ -295,4 +333,32 @@ def render_markdown(summary: dict, title: str) -> str:
     lines += ["", "| Field | Accuracy |", "|---|---|"]
     for name, accuracy in summary["field_accuracy"].items():
         lines.append(f"| {name} | {fmt(accuracy)} |")
+    if summary.get("checks"):
+        lines += [
+            "",
+            "| Check | Passed | Failed | Skipped | Pass rate (when run) |",
+            "|---|---|---|---|---|",
+        ]
+        for name, row in summary["checks"].items():
+            lines.append(
+                f"| {name} | {row['pass']} | {row['fail']} | {row['skipped']} | "
+                f"{fmt(row['pass_rate'])} |"
+            )
     return "\n".join(lines) + "\n"
+
+
+def _alarm_breakdown(review: dict) -> str:
+    checks = review.get("false_alarm_checks") or {}
+    if not checks:
+        return ""
+    return " (" + ", ".join(f"{name}: {n}" for name, n in checks.items()) + ")"
+
+
+def _cost_lines(summary: dict) -> list[str]:
+    cost = summary.get("cost_usd")
+    if not cost:
+        return []
+    return [
+        f"- Estimated cost: ${cost['per_doc']:.5f} per bill, ${cost['total']:.4f} in total "
+        f"({cost['pricing']})"
+    ]
