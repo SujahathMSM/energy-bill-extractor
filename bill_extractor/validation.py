@@ -64,6 +64,26 @@ PLAUSIBLE_RATE_PER_KWH: dict[str, tuple[float, float]] = {
 
 _MPAN_PRIMES = (3, 5, 7, 13, 17, 19, 23, 29, 31, 37, 41, 43)
 
+# The extraction fields each check reads. When a check fails, these are the fields a reviewer
+# should look at (the UI highlights them). onboarding_fields lists only the missing ones.
+CHECK_FIELDS: dict[str, list[str]] = {
+    "billing_period": ["billing_period_start", "billing_period_end", "period_days"],
+    "units_understood": ["unit_rates", "standing_charge_unit"],
+    "currency_consistent": ["currency", "unit_rates", "standing_charge_unit"],
+    "rates_plausible": ["unit_rates"],
+    "readings_match_consumption": ["previous_reading", "current_reading", "consumption_kwh"],
+    "bands_match_consumption": ["unit_rates", "consumption_kwh"],
+    "cost_reconciles": [
+        "unit_rates",
+        "consumption_kwh",
+        "standing_charge",
+        "period_days",
+        "subtotal_excl_tax",
+    ],
+    "total_reconciles": ["subtotal_excl_tax", "tax_amount", "other_charges", "total_amount"],
+    "meter_point_checksum": ["meter_point_id"],
+}
+
 
 @dataclass(frozen=True)
 class ParsedUnit:
@@ -121,8 +141,9 @@ def _per_day(value: float | None, unit: ParsedUnit | None) -> float | None:
 def analyse(ex: BillExtraction) -> tuple[Derived, list[Check]]:
     checks: list[Check] = []
 
-    def add(name: str, status: str, detail: str) -> None:
-        checks.append(Check(name=name, status=status, detail=detail))
+    def add(name: str, status: str, detail: str, fields: list[str] | None = None) -> None:
+        involved = fields if fields is not None else CHECK_FIELDS.get(name, [])
+        checks.append(Check(name=name, status=status, detail=detail, fields=involved))
 
     # --- units and currency -------------------------------------------------------------
     rate_units = [parse_unit(r.rate_unit) for r in ex.unit_rates]
@@ -172,22 +193,33 @@ def analyse(ex: BillExtraction) -> tuple[Derived, list[Check]]:
     )
 
     # --- checks ---------------------------------------------------------------------------
-    missing = [
-        label
-        for label, present in [
-            ("supplier_name", ex.supplier_name),
-            ("meter_point_id or account_number", ex.meter_point_id or ex.account_number),
-            ("billing_period_start", ex.billing_period_start),
-            ("billing_period_end", ex.billing_period_end),
-            ("consumption_kwh", ex.consumption_kwh is not None),
-            ("unit_rates", ex.unit_rates),
-        ]
-        if not present
+    required = [
+        ("supplier_name", ["supplier_name"], ex.supplier_name),
+        (
+            "meter_point_id or account_number",
+            ["meter_point_id", "account_number"],
+            ex.meter_point_id or ex.account_number,
+        ),
+        ("billing_period_start", ["billing_period_start"], ex.billing_period_start),
+        ("billing_period_end", ["billing_period_end"], ex.billing_period_end),
+        ("consumption_kwh", ["consumption_kwh"], ex.consumption_kwh is not None),
+        ("unit_rates", ["unit_rates"], ex.unit_rates),
     ]
+    missing = [(label, fields) for label, fields, present in required if not present]
     if missing:
-        add("onboarding_fields", "fail", "Missing: " + ", ".join(missing))
+        add(
+            "onboarding_fields",
+            "fail",
+            "Missing: " + ", ".join(label for label, _ in missing),
+            [f for _, fields in missing for f in fields],
+        )
     else:
-        add("onboarding_fields", "pass", "All fields needed for onboarding are present.")
+        add(
+            "onboarding_fields",
+            "pass",
+            "All fields needed for onboarding are present.",
+            [f for _, fields, _ in required for f in fields],
+        )
 
     if not (ex.billing_period_start and ex.billing_period_end):
         if printed_days:

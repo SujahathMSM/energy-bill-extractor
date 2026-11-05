@@ -93,6 +93,8 @@
   /* Workspace */
   .workspace { display: grid; grid-template-columns: 5fr 7fr; gap: 24px; align-items: start; margin-top: 32px; }
   .panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow-1); }
+  /* Keep the uploaded bill in view beside the extracted fields on wide screens. */
+  @media (min-width: 1024px) { .input-panel { position: sticky; top: 80px; } }
   .input-panel { padding: 24px; display: grid; gap: 20px; }
   .label {
     font: 600 11px/14px var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
@@ -117,8 +119,9 @@
   .preview-body { background: var(--well); box-shadow: var(--inset); height: 300px; display: grid; place-items: center; }
   .preview-body img { max-width: 100%; max-height: 300px; display: block; }
   .preview-body object { width: 100%; height: 300px; border: 0; }
+  .preview-body .note { padding: 16px; text-align: center; }
 
-  .samples { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .samples { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .sample {
     text-align: left; padding: 10px; border-radius: var(--r); cursor: pointer;
     border: 1px solid var(--line); background: var(--card); font: inherit; color: inherit;
@@ -173,6 +176,17 @@
   .cell .value.mono { font-size: 13px; }
   .cell .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
+  /* Fields involved in a failed check */
+  .flagged { position: relative; background: var(--warn-bg) !important; box-shadow: inset 0 0 0 1px var(--warn-line); border-radius: 6px; }
+  .cell.flagged { border-color: var(--warn-line); }
+  .facts div.flagged { padding: 4px; margin: -4px; }
+  .ledger tr.flagged td { background: var(--warn-bg); }
+  .ledger tr.flagged td:first-child { box-shadow: inset 3px 0 0 #f59e0b; padding-left: 8px; }
+  .flag-tag { display: inline-block; margin-left: 6px; font: 600 10px/16px var(--sans); letter-spacing: .03em; text-transform: uppercase; color: var(--warn-ink); background: var(--card); border: 1px solid var(--warn-line); border-radius: 999px; padding: 0 6px; vertical-align: 1px; }
+  .callout-info { background: var(--skip-bg); border-color: var(--skip-line); color: var(--ink-2); }
+  .json-tools .actions { display: flex; gap: 6px; }
+  .json-tools .btn { height: 28px; font-size: 12px; }
+
   .block { border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; }
   .block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .block-head .count { font-size: 12px; color: var(--muted); }
@@ -184,6 +198,7 @@
   .not-printed { color: var(--muted); font-size: 14px; line-height: 24px; }
 
   .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0; }
+  .facts.four { grid-template-columns: repeat(4, 1fr); }
   .facts div { min-width: 0; }
   .facts dt { font-size: 12px; color: var(--muted); }
   .facts dd { margin: 2px 0 0; font-weight: 500; overflow-wrap: anywhere; }
@@ -241,7 +256,7 @@
   @media (prefers-reduced-motion: reduce) { .reveal { animation: none; } }
 
   .json-view { padding: 0; display: flex; flex-direction: column; gap: 0; }
-  .json-tools { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .json-tools { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
   .json-view pre { margin: 0; padding: 16px 24px; background: var(--well); box-shadow: var(--inset); font: 400 12px/18px var(--mono); color: var(--ink-2); overflow: auto; max-height: 720px; flex: 1; }
 
   /* Sections */
@@ -295,7 +310,7 @@
     h1 { font-size: 28px; line-height: 36px; letter-spacing: -.02em; }
     .input-panel, .result-body { padding: 16px; }
     .result-head { padding: 10px 12px 10px 16px; }
-    .cells, .facts { grid-template-columns: 1fr 1fr; }
+    .cells, .facts, .facts.four { grid-template-columns: 1fr 1fr; }
     .samples { grid-template-columns: 1fr; }
     .checks li { grid-template-columns: 76px 1fr; row-gap: 2px; }
     .cells .cell:last-child { grid-column: 1 / -1; }
@@ -305,6 +320,10 @@
     .ledger td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; padding: 2px 0 0; font-size: 12px; }
     .ledger td:nth-child(2):empty { display: none; }
     .checks .why { grid-column: 2; }
+    .result-head { flex-wrap: wrap; }
+    .json-view pre { padding: 12px 16px; max-height: 480px; }
+    .savings-form { grid-template-columns: 1fr; }
+    .mpan span { padding: 8px 10px; min-width: 0; font-size: 14px; }
     .steps, .stats { grid-template-columns: 1fr; }
     .steps li, .stats div { border-left: 0; border-top: 1px solid var(--line); }
     .steps li:first-child, .stats div:first-child { border-top: 0; }
@@ -350,9 +369,9 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
             </span>
             <strong>Drop a bill here, or choose a file</strong>
-            <span class="hint" id="limits">PDF, PNG, JPEG or WebP</span>
+            <span class="hint" id="limits">PDF, PNG, JPEG, WebP or HEIC</span>
           </label>
-          <input class="sr-only" type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/webp" aria-labelledby="bill-label">
+          <input class="sr-only" type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif" aria-labelledby="bill-label">
 
           <div class="preview" id="preview" hidden>
             <div class="preview-head">
@@ -381,6 +400,11 @@
               <span class="sample-kind">Phone photo</span>
               <span class="sample-name">Brackenridge Power</span>
               <span class="sample-note">Tilted, previous balance</span>
+            </button>
+            <button class="sample" type="button" aria-pressed="false" data-src="/static/samples/bill_011_fault.pdf" data-type="application/pdf">
+              <span class="sample-kind">Planted error</span>
+              <span class="sample-name">Tidewell Energy</span>
+              <span class="sample-note">Readings swapped: should be flagged</span>
             </button>
           </div>
         </div>
@@ -419,7 +443,10 @@
         <div class="result-body json-view" id="view-json" role="tabpanel" aria-labelledby="tab-json" hidden>
           <div class="json-tools">
             <span>The exact response from POST /v1/bills/extract</span>
-            <button class="btn btn-secondary" type="button" id="copy" style="height:28px;font-size:12px">Copy</button>
+            <span class="actions">
+              <button class="btn btn-secondary" type="button" id="copy" disabled>Copy</button>
+              <button class="btn btn-secondary" type="button" id="download" disabled>Download .json</button>
+            </span>
           </div>
           <pre id="json-out">No result yet. Extract a bill to see the response.</pre>
         </div>
@@ -460,32 +487,33 @@
 
   <section class="wrap band" id="results">
     <h2>Results on synthetic bills</h2>
-    <p class="section-lede">claude-sonnet-5-5, 17 October 2026. Ten fictional bills, each tested as a digital PDF, a 150 dpi scan and a tilted, unevenly lit phone photo.</p>
+    <p class="section-lede">Recorded runs, 17 October 2026, on 24 fictional bills in three layouts. Each was read as a digital PDF, a 150 dpi scan and phone photos at four levels of damage. Six bills had a deliberate error printed on them, which the checks had to catch.</p>
     <dl class="stats">
-      <div><dt>Field accuracy</dt><dd>100%<small>510 of 510 fields</small></dd></div>
-      <div><dt>Bills with every field right</dt><dd>30 of 30<small>across all three formats</small></dd></div>
-      <div><dt>Time per bill</dt><dd>2.5 s<small>median; 3.2 s at p95</small></dd></div>
-      <div><dt>Tokens per bill</dt><dd>4.2k<small>in, plus about 270 out</small></dd></div>
+      <div><dt>Field accuracy, Sonnet 5.5</dt><dd>97.5%<small>96 photos, clean to severe</small></dd></div>
+      <div><dt>Planted errors caught</dt><dd>36 of 36<small>Haiku 5.5, expected check fired every time</small></dd></div>
+      <div><dt>Time per bill</dt><dd>2.6 s<small>median; 7.0 s at p95</small></dd></div>
+      <div><dt>Cost per bill</dt><dd>$0.013<small>Sonnet 5.5; Haiku about $0.0008</small></dd></div>
     </dl>
     <div class="table-wrap">
       <table class="data">
         <thead>
           <tr>
-            <th class="label">Format</th>
+            <th class="label">Photo damage</th>
             <th class="label num">Bills</th>
-            <th class="label num">Field accuracy</th>
-            <th class="label num">Every field right</th>
-            <th class="label num">Median time</th>
+            <th class="label num">Sonnet field accuracy</th>
+            <th class="label num">Haiku field accuracy</th>
+            <th class="label num">Sonnet: every field right</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td>Digital PDF</td><td class="num mono">10</td><td class="num mono">100%</td><td class="num mono">10 of 10</td><td class="num mono">2.6 s</td></tr>
-          <tr><td>Scan, 150 dpi</td><td class="num mono">10</td><td class="num mono">100%</td><td class="num mono">10 of 10</td><td class="num mono">2.6 s</td></tr>
-          <tr><td>Phone photo</td><td class="num mono">10</td><td class="num mono">100%</td><td class="num mono">10 of 10</td><td class="num mono">2.4 s</td></tr>
+          <tr><td>Clean</td><td class="num mono">24</td><td class="num mono">99.8%</td><td class="num mono">99.6%</td><td class="num mono">96%</td></tr>
+          <tr><td>Mild (typical phone photo)</td><td class="num mono">24</td><td class="num mono">99.6%</td><td class="num mono">98.9%</td><td class="num mono">92%</td></tr>
+          <tr><td>Moderate</td><td class="num mono">24</td><td class="num mono">99.6%</td><td class="num mono">99.6%</td><td class="num mono">92%</td></tr>
+          <tr><td>Severe (blurred, dim, glare, cropped)</td><td class="num mono">24</td><td class="num mono">91.0%</td><td class="num mono">86.0%</td><td class="num mono">33%</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="fine">These bills are clean and consistently laid out, so a perfect score shows the pipeline works end to end, not that real bills will score perfectly. Because nothing was wrong, this run couldn't test how often the review flag catches real mistakes. Unit tests cover that by planting known errors, such as pence read as pounds or a misread MPAN digit.</p>
+    <p class="fine">Accuracy holds until photos are severely damaged, then falls. Long digit strings such as the MPAN and meter serial fail first; money fields stayed at 98–100%. Photos this blurry now fail the photo-quality check, so they are sent for review. Synthetic bills are cleaner than real ones, so treat these numbers as an upper bound. See EVALS.md in the repository for the method and failure analysis.</p>
   </section>
 </main>
 
@@ -511,12 +539,12 @@
     file: $("file"), drop: $("drop"), preview: $("preview"), previewName: $("preview-name"),
     previewSize: $("preview-size"), previewBody: $("preview-body"), clear: $("clear"),
     extract: $("extract"), status: $("status"), fields: $("view-fields"), json: $("view-json"),
-    jsonOut: $("json-out"), tabFields: $("tab-fields"), tabJson: $("tab-json"), copy: $("copy"),
+    jsonOut: $("json-out"), tabFields: $("tab-fields"), tabJson: $("tab-json"), copy: $("copy"), download: $("download"),
     engineDot: $("engine-dot"), engineModel: $("engine-model"), engineNote: $("engine-note"),
     limits: $("limits"), shortcut: $("shortcut"),
   };
   const samples = [...document.querySelectorAll(".sample")];
-  const state = { file: null, objectUrl: null, busy: false, maxBytes: 10 * 1024 * 1024, timer: null, lastResult: null, savingsBusy: false };
+  const state = { file: null, objectUrl: null, busy: false, maxBytes: 10 * 1024 * 1024, timer: null, lastResult: null, savingsBusy: false, heic: true };
 
   const CHECK_NAMES = {
     onboarding_fields: "Fields needed for sign-up",
@@ -529,6 +557,7 @@
     cost_reconciles: "Charges add up to the subtotal",
     total_reconciles: "Subtotal plus tax equals the total",
     meter_point_checksum: "MPAN check digit",
+    input_quality: "Photo sharp and large enough",
   };
   const SYMBOLS = { GBP: "£", EUR: "€", USD: "$" };
 
@@ -557,11 +586,12 @@
     els.engineDot.className = "dot ok";
     els.engineModel.textContent = h.model;
     els.engineNote.textContent = h.backend === "mock"
-      ? "Mock backend: returns the same example bill for any file. Set BILLX_BACKEND to use a real model."
+      ? "Demo mode, no model: the sample bills return their known values; any other file returns one fixed example bill. Set BILLX_BACKEND to use a real model."
       : `Backend: ${h.backend}. Chosen on the server with BILLX_BACKEND.`;
+    if (h.formats) state.heic = h.formats.includes("heic");
     if (h.limits) {
       state.maxBytes = h.limits.max_upload_mb * 1024 * 1024;
-      els.limits.textContent = `PDF, PNG, JPEG or WebP, up to ${h.limits.max_upload_mb} MB. PDFs: first ${h.limits.max_pages} pages are read.`;
+      els.limits.textContent = `PDF, PNG, JPEG, WebP${state.heic ? " or HEIC" : ""}, up to ${h.limits.max_upload_mb} MB. PDFs: first ${h.limits.max_pages} pages are read.`;
     }
   }).catch(() => {
     els.engineDot.className = "dot bad";
@@ -582,17 +612,32 @@
     state.objectUrl = URL.createObjectURL(file);
     els.previewName.textContent = file.name;
     els.previewSize.textContent = bytes(file.size);
-    els.previewBody.innerHTML = file.type === "application/pdf"
+    const kind = fileKind(file);
+    els.previewBody.innerHTML = kind === "pdf"
       ? `<object data="${state.objectUrl}#toolbar=0&navpanes=0" type="application/pdf"><span class="note">Preview not available. The file will still be read.</span></object>`
-      : `<img src="${state.objectUrl}" alt="Preview of ${esc(file.name)}">`;
+      : kind === "heic"
+        ? `<span class="note">This browser can't preview HEIC photos. The file will still be read.</span>`
+        : `<img src="${state.objectUrl}" alt="Preview of ${esc(file.name)}">`;
     els.preview.hidden = false; els.drop.hidden = true;
     els.extract.disabled = state.busy;
   }
 
+  // Some systems report an empty or generic MIME type for dropped files, so fall back to the
+  // extension. The server sniffs the real type from the file's bytes either way.
+  function fileKind(file) {
+    const t = (file.type || "").toLowerCase();
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    if (t === "application/pdf" || ext === "pdf") return "pdf";
+    if (t === "image/heic" || t === "image/heif" || ext === "heic" || ext === "heif") return "heic";
+    if (/^image\/(png|jpeg|webp)$/.test(t) || ["png", "jpg", "jpeg", "webp"].includes(ext)) return "image";
+    return null;
+  }
+
   function pick(file) {
     if (!file) return;
-    if (!/^(application\/pdf|image\/(png|jpeg|webp))$/.test(file.type)) {
-      showError("This file type isn't supported. Choose a PDF, PNG, JPEG or WebP file.");
+    const kind = fileKind(file);
+    if (!kind || (kind === "heic" && !state.heic)) {
+      showError(`This file type isn't supported. Choose a PDF, PNG, JPEG${state.heic ? ", WebP or HEIC" : " or WebP"} file.`);
       return;
     }
     if (file.size > state.maxBytes) {
@@ -644,6 +689,21 @@
     catch { els.copy.textContent = "Copy failed"; }
     setTimeout(() => { els.copy.textContent = "Copy"; }, 1500);
   });
+  els.download.addEventListener("click", () => {
+    if (!state.lastResult) return;
+    const blob = new Blob([JSON.stringify(state.lastResult, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const base = (state.file?.name || "bill").replace(/\.[^.]+$/, "");
+    a.href = url; a.download = `${base}.extraction.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  function setJson(data) {
+    state.lastResult = data;
+    els.jsonOut.textContent = data ? JSON.stringify(data, null, 2) : "No result yet. Extract a bill to see the response.";
+    els.copy.disabled = els.download.disabled = !data;
+  }
 
   // ---------- status ----------
   function setStatus(kind, text) {
@@ -655,6 +715,8 @@
   async function extract() {
     if (!state.file || state.busy) return;
     state.busy = true; els.extract.disabled = true;
+    els.extract.firstElementChild.textContent = "Reading the bill…";
+    setJson(null);
     setStatus("busy", "Reading the bill");
     const started = performance.now();
     render(null, "loading");
@@ -673,8 +735,7 @@
         const id = res.headers.get("x-request-id");
         throw new Error(id ? `${detail} Request ID: ${id}.` : detail);
       }
-      els.jsonOut.textContent = JSON.stringify(data, null, 2);
-      state.lastResult = data;
+      setJson(data);
       render(data, "done");
       const failed = data.checks.filter((c) => c.status === "fail").length;
       setStatus(data.needs_review ? "warn" : "pass", data.needs_review ? `Needs review: ${failed} check${failed === 1 ? "" : "s"} failed` : "All checks passed");
@@ -682,6 +743,7 @@
       showError(err.message || "The request failed. Check that the server is running.");
     } finally {
       clearInterval(state.timer);
+      els.extract.firstElementChild.textContent = "Extract fields";
       state.busy = false; els.extract.disabled = !state.file;
     }
   }
@@ -801,6 +863,10 @@
   }
 
   const taxWord = (cur) => cur === "GBP" ? "VAT" : "Tax";
+  // Mark what a failed check points at: `flag(r, "total_amount")` -> " flagged" class.
+  const isFlagged = (r, ...fields) => !!r && (r.flagged_fields || []).some((f) => fields.includes(f));
+  const flag = (r, ...fields) => isFlagged(r, ...fields) ? " flagged" : "";
+  const flagTag = (r, ...fields) => isFlagged(r, ...fields) ? `<span class="flag-tag" title="A check on this value failed">Check</span>` : "";
 
   function checkNames(r) {
     const cur = r.derived.currency, other = (r.extraction.other_charges || []).length;
@@ -821,20 +887,20 @@
       const kwh = rate.kwh ?? (single ? x.consumption_kwh : null);
       const amount = isNum(n.per_kwh) && isNum(kwh) ? n.per_kwh * kwh : null;
       if (amount === null) complete = false; else sum += amount;
-      rows.push(`<tr><td>${esc(rate.label || "Unit rate")}</td><td class="mono">${isNum(kwh) ? num(kwh) + " kWh × " : ""}${esc(num(rate.rate))} ${esc(rate.rate_unit)}</td><td class="mono">${dash(money(amount, cur))}</td></tr>`);
+      rows.push(`<tr class="${flag(r, "unit_rates")}"><td>${esc(rate.label || "Unit rate")}${flagTag(r, "unit_rates")}</td><td class="mono">${isNum(kwh) ? num(kwh) + " kWh × " : ""}${esc(num(rate.rate))} ${esc(rate.rate_unit)}</td><td class="mono">${dash(money(amount, cur))}</td></tr>`);
     });
     if (isNum(x.standing_charge)) {
       const amount = isNum(d.standing_charge_per_day) && d.period_days ? d.standing_charge_per_day * d.period_days : null;
       if (amount === null) complete = false; else sum += amount;
-      rows.push(`<tr><td>Standing charge</td><td class="mono">${d.period_days ? d.period_days + " days × " : ""}${esc(num(x.standing_charge))} ${esc(x.standing_charge_unit || "")}</td><td class="mono">${dash(money(amount, cur))}</td></tr>`);
+      rows.push(`<tr class="${flag(r, "standing_charge", "standing_charge_unit")}"><td>Standing charge${flagTag(r, "standing_charge", "standing_charge_unit")}</td><td class="mono">${d.period_days ? d.period_days + " days × " : ""}${esc(num(x.standing_charge))} ${esc(x.standing_charge_unit || "")}</td><td class="mono">${dash(money(amount, cur))}</td></tr>`);
     }
     if (rows.length && complete) rows.push(`<tr class="computed"><td>Calculated</td><td>From the rates above</td><td class="mono">${money(sum, cur)}</td></tr>`);
-    rows.push(`<tr><td>Before ${tax === "VAT" ? "VAT" : "tax"}</td><td>As printed on the bill</td><td class="mono">${dash(money(x.subtotal_excl_tax, cur))}</td></tr>`);
-    rows.push(`<tr><td>${tax}</td><td></td><td class="mono">${dash(money(x.tax_amount, cur))}</td></tr>`);
+    rows.push(`<tr class="${flag(r, "subtotal_excl_tax")}"><td>Before ${tax === "VAT" ? "VAT" : "tax"}${flagTag(r, "subtotal_excl_tax")}</td><td>As printed on the bill</td><td class="mono">${dash(money(x.subtotal_excl_tax, cur))}</td></tr>`);
+    rows.push(`<tr class="${flag(r, "tax_amount")}"><td>${tax}${flagTag(r, "tax_amount")}</td><td></td><td class="mono">${dash(money(x.tax_amount, cur))}</td></tr>`);
     (x.other_charges || []).forEach((c) => {
-      rows.push(`<tr><td>${esc(c.label)}</td><td>Other charge, as printed</td><td class="mono">${dash(money(c.amount, cur))}</td></tr>`);
+      rows.push(`<tr class="${flag(r, "other_charges")}"><td>${esc(c.label)}${flagTag(r, "other_charges")}</td><td>Other charge, as printed</td><td class="mono">${dash(money(c.amount, cur))}</td></tr>`);
     });
-    rows.push(`<tr class="total"><td>Total for this period</td><td></td><td class="mono">${dash(money(x.total_amount, cur))}</td></tr>`);
+    rows.push(`<tr class="total${flag(r, "total_amount")}"><td>Total for this period${flagTag(r, "total_amount")}</td><td></td><td class="mono">${dash(money(x.total_amount, cur))}</td></tr>`);
     return rows.join("");
   }
 
@@ -859,6 +925,15 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17v.5"/></svg>
         <div><h3>Check these before using the data</h3><ul>${r.checks.filter((c) => c.status === "fail").map((c) => `<li><strong>${esc(names[c.name] || c.name)}:</strong> ${esc(c.detail)}</li>`).join("")}</ul></div>
       </div>` : "";
+
+    const notes = done && (r.warnings || []).length ? `
+      <div class="callout callout-info">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.5"/></svg>
+        <div><h3>About this file</h3><ul>${r.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>
+      </div>` : "";
+    const fr = done ? r : null;
+    const readings = done && (isNum(x.previous_reading) || isNum(x.current_reading))
+      ? `${dash(num(x.previous_reading))} → ${dash(num(x.current_reading))}` : null;
 
     const counts = done ? ["pass", "fail", "skipped"].map((s) => r.checks.filter((c) => c.status === s).length) : null;
     const checkList = done
@@ -893,26 +968,28 @@
     els.fields.innerHTML = `
       ${intro}
       ${review}
+      ${notes}
       <div class="cells">
-        <div class="cell"><span class="label">Supplier</span><div class="value">${show(x.supplier_name, 110)}</div></div>
-        <div class="cell"><span class="label">Account number</span><div class="value mono">${show(x.account_number, 90)}</div></div>
-        <div class="cell"><span class="label">Billing period</span><div class="value mono">${show(period, 130)}</div>${done && d.period_days ? `<div class="sub">${d.period_days} days</div>` : ""}</div>
+        <div class="cell${flag(fr, "supplier_name")}"><span class="label">Supplier${flagTag(fr, "supplier_name")}</span><div class="value">${show(x.supplier_name, 110)}</div></div>
+        <div class="cell${flag(fr, "account_number")}"><span class="label">Account number${flagTag(fr, "account_number")}</span><div class="value mono">${show(x.account_number, 90)}</div></div>
+        <div class="cell${flag(fr, "billing_period_start", "billing_period_end", "period_days")}"><span class="label">Billing period${flagTag(fr, "billing_period_start", "billing_period_end", "period_days")}</span><div class="value mono">${show(period, 130)}</div>${done && d.period_days ? `<div class="sub">${d.period_days} days${isNum(x.period_days) ? " as printed" : ", counted from the dates"}</div>` : ""}</div>
       </div>
 
-      <div class="block">
+      <div class="block${flag(fr, "meter_point_id")}">
         <div class="block-head"><span class="label">${gb ? "Supply number (MPAN)" : "Supply number"}</span>${done && x.meter_point_id ? checkBadge(checks.meter_point_checksum, ["Check digit valid", "Check digit wrong", "Not checked"]) : ""}</div>
         ${mpanCells(done ? x.meter_point_id : null, done)}
         <dl class="facts">
-          <div><dt>Meter serial</dt><dd class="mono">${show(x.meter_serial, 90)}</dd></div>
-          <div><dt>Reading</dt><dd>${show(cap(x.reading_type), 60)}</dd></div>
-          <div><dt>Tariff</dt><dd>${show(x.tariff_name, 120)}</dd></div>
+          <div class="${flag(fr, "meter_serial")}"><dt>Meter serial</dt><dd class="mono">${show(x.meter_serial, 90)}</dd></div>
+          <div class="${flag(fr, "reading_type")}"><dt>Reading</dt><dd>${show(cap(x.reading_type), 60)}</dd></div>
+          <div class="${flag(fr, "tariff_name")}"><dt>Tariff</dt><dd>${show(x.tariff_name, 120)}</dd></div>
         </dl>
       </div>
 
       <div class="block">
         <div class="block-head"><span class="label">Usage</span></div>
-        <dl class="facts">
-          <div><dt>Used this period</dt><dd class="mono">${done ? dash(isNum(x.consumption_kwh) ? num(x.consumption_kwh) + " kWh" : null) : ph(70)}</dd></div>
+        <dl class="facts four">
+          <div class="${flag(fr, "previous_reading", "current_reading")}"><dt>Meter readings${flagTag(fr, "previous_reading", "current_reading")}</dt><dd class="mono">${done ? dash(readings) : ph(90)}${done && !readings ? `<span class="sub">Not printed (smart or multi-register meter)</span>` : ""}</dd></div>
+          <div class="${flag(fr, "consumption_kwh")}"><dt>Used this period${flagTag(fr, "consumption_kwh")}</dt><dd class="mono">${done ? dash(isNum(x.consumption_kwh) ? num(x.consumption_kwh) + " kWh" : null) : ph(70)}</dd></div>
           <div><dt>Average per day</dt><dd class="mono">${done ? dash(isNum(d.avg_daily_kwh) ? num(d.avg_daily_kwh, 1) + " kWh" : null) : ph(60)}</dd></div>
           <div><dt>Estimated per year</dt><dd class="mono">${done ? dash(isNum(d.estimated_annual_kwh) ? num(d.estimated_annual_kwh, 0) + " kWh" : null) : ph(70)}${done && isNum(d.estimated_annual_kwh) ? `<span class="sub">Daily average × 365, ignores seasons</span>` : ""}</dd></div>
         </dl>

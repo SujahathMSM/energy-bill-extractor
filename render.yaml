@@ -1,0 +1,22 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# One Docker web service running the API and the demo page. See DEPLOY.md.
+services:
+  - type: web
+    name: energy-bill-extractor
+    runtime: docker
+    plan: free            # 512 MB RAM is enough (~90 MB in use); spins down when idle
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: false     # deploy on demand from the dashboard
+    envVars:
+      # mock = demo mode, no key and no model costs. Switch to anthropic once the key is set.
+      - key: BILLX_BACKEND
+        value: mock
+      - key: ANTHROPIC_API_KEY
+        sync: false       # entered in the dashboard; never committed
+      - key: BILLX_ANTHROPIC_MODEL
+        value: claude-haiku-5-5
+      - key: BILLX_MAX_UPLOAD_MB
+        value: "10"
+      - key: BILLX_CORS_ORIGINS
+        value: ""

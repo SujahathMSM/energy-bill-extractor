@@ -2,15 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
+    name: Lint and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -20,19 +28,27 @@ jobs:
         run: |
           ruff check .
           ruff format --check .
-      - name: Test
+      - name: Test (model calls mocked; no secrets needed)
         run: pytest
 
   docker:
+    name: Docker build and smoke test
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build image
         run: docker build -t energy-bill-extractor:ci .
       - name: Smoke test
         run: |
           docker run -d --name api -p 8000:8000 -e BILLX_BACKEND=mock energy-bill-extractor:ci
-          for i in $(seq 1 20); do curl -fsS localhost:8000/health && break; sleep 1; done
-          curl -fsS -F "file=@samples/bill_000.pdf" localhost:8000/v1/bills/extract | python -m json.tool | head -20
-          docker rm -f api
+          for i in $(seq 1 30); do curl -fsS localhost:8000/health && break; sleep 1; done
+          curl -fsS -F "file=@bill_extractor/static/samples/bill_000.pdf" \
+            localhost:8000/v1/bills/extract > result.json
+          python -c "import json; r = json.load(open('result.json')); assert r['extraction']['supplier_name'] == 'Brackenridge Power', r; print('extract ok')"
+          status=$(curl -s -o /dev/null -w '%{http_code}' -F "file=@README.md" localhost:8000/v1/bills/extract)
+          test "$status" = 415 && echo "rejects a non-bill ok"
+          test "$(docker exec api id -u)" != 0 && echo "runs as non-root ok"
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs api

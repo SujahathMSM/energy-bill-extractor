@@ -24,7 +24,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
+# iPhone photos (HEIC). Optional: the API answers 415 with a hint when it is missing.
+heic = ["pillow-heif>=0.18"]
+dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27", "pillow-heif>=0.18"]
 
 [tool.setuptools.packages.find]
 include = ["bill_extractor*"]

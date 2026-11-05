@@ -17,7 +17,8 @@ from pathlib import Path
 from .backends import BackendError, VLMBackend, build_backend
 from .config import Settings
 from .extractor import BillExtractor, ExtractionError
-from .preprocess import UnsupportedFileError
+from .preprocess import ImageTooLargeError, UnsupportedFileError
+from .pricing import price_for
 from .schema import BillExtraction
 from .scoring import DocResult, render_markdown, score_fields, summarise
 
@@ -55,12 +56,15 @@ async def evaluate(
         async with semaphore:
             try:
                 extracted = await extractor.extract(data, request_id=f"{record['id']}:{variant}")
-            except (ExtractionError, BackendError, UnsupportedFileError) as exc:
+            except (ExtractionError, BackendError, UnsupportedFileError, ImageTooLargeError) as exc:
+                result.schema_valid = False if isinstance(exc, ExtractionError) else None
                 result.error = f"{type(exc).__name__}: {exc}"
                 if result.error not in seen_errors:
                     seen_errors.add(result.error)
                     print(f"[{record['id']}:{variant}] {result.error}", file=sys.stderr)
                 return result
+        result.schema_valid = True
+        result.check_status = {c.name: c.status for c in extracted.checks}
         result.outcomes = score_fields(truth, extracted.extraction)
         result.needs_review = extracted.needs_review
         result.failed_checks = [c.name for c in extracted.checks if c.status == "fail"]
@@ -78,8 +82,24 @@ async def evaluate(
     return list(await asyncio.gather(*tasks))
 
 
+def add_cost(summary: dict, model: str, label: str | None = None) -> dict:
+    """Add an estimated dollar cost from the summary's token counts, if the model is priced."""
+    price = price_for(model)
+    if price is None or not summary["docs"]:
+        return summary
+    tokens = summary["tokens"]
+    total = (tokens["input"] * price[0] + tokens["output"] * price[1]) / 1_000_000
+    scored = summary["docs"] - summary["errors"] or 1
+    summary["cost_usd"] = {
+        "total": round(total, 6),
+        "per_doc": round(total / scored, 6),
+        "pricing": label or f"{model} at ${price[0]:g} / ${price[1]:g} per M tokens in / out",
+    }
+    return summary
+
+
 def write_reports(results: list[DocResult], backend: VLMBackend, out_dir: Path) -> tuple[Path, str]:
-    summary = summarise(results)
+    summary = add_cost(summarise(results), backend.model)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     safe_model = backend.model.replace("/", "_").replace(":", "_")
     base = out_dir / f"eval-{backend.name}-{safe_model}-{stamp}"
@@ -112,6 +132,8 @@ async def _main(args: argparse.Namespace) -> None:
         max_attempts=settings.max_attempts,
         max_pages=settings.max_pages,
         max_side=settings.max_image_side,
+        max_megapixels=settings.max_image_megapixels,
+        blur_threshold=settings.blur_threshold,
     )
     started = time.perf_counter()
     try:
