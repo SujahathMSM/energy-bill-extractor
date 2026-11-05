@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BackendName = Literal["mock", "anthropic", "openai", "ollama"]
@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     # "https://app.example.com". Empty (default) means same-origin only: the bundled UI is
     # served by the API itself and needs no CORS. "*" allows any origin (no credentials).
     cors_origins: str = Field("", alias="BILLX_CORS_ORIGINS")
+
+    @field_validator(
+        "anthropic_api_key", "openai_api_key", "openai_base_url", "openai_model", mode="before"
+    )
+    @classmethod
+    def _blank_is_unset(cls, value):
+        """`OPENAI_BASE_URL=` copied from .env.example means "not set", not an empty URL."""
+        return None if isinstance(value, str) and not value.strip() else value
 
     @property
     def cors_origin_list(self) -> list[str]:
